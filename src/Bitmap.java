@@ -22,4 +22,13 @@ public class Bitmap {
     public void markPieceAsReceived(int index) {
         bitfield.set(index);
     }
+
+    public byte[] getBitfield() {
+        return bitfield.toByteArray();
+    }
+
+    // debugging
+    public void printBitfield() {
+        System.out.println("Current Bitfield: " + bitfield);
+    }
 }

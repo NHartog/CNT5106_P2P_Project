@@ -1,5 +1,6 @@
 import java.io.IOException;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -80,9 +81,9 @@ public class Peer {
             for (String line : lines) {
                 String[] tokens = line.split(" ");
                 int id = Integer.parseInt(tokens[0]);
-                peerIDs.add(id);  // ✅ Now we correctly populate peerIDs
+                peerIDs.add(id);
 
-                if (id == peerID) { // ✅ Assigns details for the current peer
+                if (id == peerID) {
                     hostname = tokens[1];
                     port = Integer.parseInt(tokens[2]);
                     hasFile = tokens[3].equals("1");
@@ -98,4 +99,25 @@ public class Peer {
 
     }
 
+    private void connectToPeers() {
+        for (int id : peerIDs) {
+            if (id >= peerID) break;
+
+            try {
+                String peerHost = "localhost";
+                int peerPort = port;
+
+                Socket socket = new Socket(peerHost, peerPort);
+                logger.log("Connected to Peer " + id);
+
+                neighbors.addNeighbor(id, socket);
+
+                new Thread(new Receiver(socket, this)).start();
+
+                senders.put(id, new Sender(socket, peerID));
+            } catch (IOException e) {
+                logger.log("Failed to connect to Peer " + id);
+            }
+        }
+    }
 }
