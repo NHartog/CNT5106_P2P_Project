@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.List;
 
 public class Logger {
     private final String logFile;
@@ -17,10 +16,10 @@ public class Logger {
     }
 
     public void log(String message) {
-        String timestampedMessage = LocalDateTime.now() + ": " + message;
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFile, true))) {
-            writer.write(timestampedMessage);
+            writer.write(message);
             writer.newLine();
+            System.out.println(message);
         } catch (IOException e) {
             System.out.println("Error writing to log file: " + logFile);
         }

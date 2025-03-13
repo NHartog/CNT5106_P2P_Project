@@ -6,6 +6,7 @@ import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 
 public class Peer {
@@ -35,9 +36,74 @@ public class Peer {
             this.port = port;
         }
 
+        public final static String HEADER = "P2PFILESHARINGPROJ";
         private int peerID;
         private String hostname;
         private int port;
+    }
+
+    public PeerInfo getPeerInfo() {
+        return peerInfo;
+    }
+
+    public boolean isHasFile() {
+        return hasFile;
+    }
+
+    public int getNumPreferredNeighbors() {
+        return numPreferredNeighbors;
+    }
+
+    public int getUnchokingInterval() {
+        return unchokingInterval;
+    }
+
+    public int getOptimisticUnchokingInterval() {
+        return optimisticUnchokingInterval;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public int getFileSize() {
+        return fileSize;
+    }
+
+    public int getPieceSize() {
+        return pieceSize;
+    }
+
+    public int getNumPieces() {
+        return numPieces;
+    }
+
+    public Neighbors getNeighbors() {
+        return neighbors;
+    }
+
+    public Logger getLogger() {
+        return logger;
+    }
+
+    public Bitmap getBitmap() {
+        return bitmap;
+    }
+
+    public FileManager getFileManager() {
+        return fileManager;
+    }
+
+    public MessageManager getMessageManager() {
+        return messageManager;
+    }
+
+    public HashSet<Integer> getConnectedPeers() {
+        return connectedPeers;
+    }
+
+    public List<PeerInfo> getOtherPeerInfo() {
+        return peers;
     }
 
     private final PeerInfo peerInfo = new PeerInfo();
@@ -54,9 +120,11 @@ public class Peer {
     private final Logger logger;
     private final Bitmap bitmap;
     private final FileManager fileManager;
+    private final MessageManager messageManager;
 
     //match senders to ids to track can talk about this
     private final List<PeerInfo> peers = new ArrayList<>();
+    private final HashSet<Integer> connectedPeers = new HashSet<>();
     private ServerSocket serverSocket;
 
     public Peer(String ID) {
@@ -70,6 +138,7 @@ public class Peer {
         this.bitmap = new Bitmap(numPieces, hasFile);
         this.fileManager = new FileManager(peerInfo.getPeerID(), fileName, fileSize, pieceSize);
         this.neighbors = new Neighbors(peerInfo.getPeerID(), logger);
+        this.messageManager = new MessageManager(this);
     }
 
     private void initializeServerSocket() {
@@ -129,13 +198,10 @@ public class Peer {
                 String[] tokens = line.split(" ");
                 int id = Integer.parseInt(tokens[0]);
 
-                if (id > peerInfo.getPeerID()) { // If past current peer, break
-                    break;
-                } else if (id == peerInfo.getPeerID()) { // If at current peer, get info and break
+                if (id == peerInfo.getPeerID()) { // If at current peer, get info and break
                     peerInfo.setHostname(tokens[1]);
                     peerInfo.setPort(Integer.parseInt(tokens[2]));
                     hasFile = tokens[3].equals("1");
-                    break;
                 } else { // Get general peer information for all peers above current id
                     PeerInfo info = new PeerInfo();
                     info.setPeerID(id);
@@ -152,8 +218,14 @@ public class Peer {
 
     private void createSenders() {
         for (PeerInfo peer : peers) {
-            try (Socket requestSocket = new Socket(peer.getHostname(), peer.getPort())) {
-                Thread senderThread = new Thread(new Sender(requestSocket, this));
+            if (peer.getPeerID() >= peerInfo.getPeerID()) {
+                // If the viewed peer is beyond the current peer, don't create a sender.
+                // Senders should only be created for peers that are less than the current peer's ID
+                continue;
+            }
+            try {
+                Socket requestSocket = new Socket(peer.getHostname(), peer.getPort());
+                Thread senderThread = new Thread(new Sender(requestSocket, this, peer.getPeerID()));
                 safelyStartThread(senderThread);
             } catch (IOException e) {
                 e.printStackTrace();
@@ -166,19 +238,8 @@ public class Peer {
             while (!Thread.currentThread().isInterrupted() && !serverSocket.isClosed()) {
                 try {
                     Socket socket = serverSocket.accept();
-                    System.out.println("\nCreating Receiver Thread");
                     Thread thread = new Thread(new Receiver(socket, this));
-                    thread.start();
-                    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                        System.out.println("\nShutdown hook triggered. Cleaning up receiver thread...");
-                        thread.interrupt(); // Signal the worker thread to stop
-                        try {
-                            thread.join(); // Wait for thread to terminate
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                        }
-                        System.out.println("Cleanup completed. Exiting.");
-                    }));
+                    safelyStartThread(thread);
                 } catch (SocketException e) {
                     System.out.println("Socket Exception: " + e.getMessage());
                 } catch (SocketTimeoutException e) {
@@ -199,7 +260,7 @@ public class Peer {
         createReceivers();
     }
 
-    private void safelyStartThread(Thread thread){
+    private void safelyStartThread(Thread thread) {
         thread.start();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("\nShutdown hook triggered. Cleaning up thread...");
