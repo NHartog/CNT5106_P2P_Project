@@ -2,14 +2,18 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
 
-public class Sender {
+public class Sender implements Runnable {
 
     private DataOutputStream out;
-    private int peerID;
+    private Peer peer;
 
-    public Sender(Socket socket, int peerID) throws IOException {
-        this.peerID = peerID;
+    public Sender(Socket socket, Peer peer) throws IOException {
+        this.peer = peer;
         this.out = new DataOutputStream(socket.getOutputStream());
     }
 
+    @Override
+    public void run() {
+
+    }
 }
