@@ -6,6 +6,50 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 
 public class MessageManager {
+
+    public enum MessageType {
+        CHOKE(0),
+        UNCHOKE(1),
+        INTERESTED(2),
+        NOT_INTERESTED(3),
+        HAVE(4),
+        BITFIELD(5),
+        REQUEST(6),
+        PIECE(7);
+
+        private final int value;
+
+        MessageType(int value) {
+            this.value = value;
+        }
+
+        public int getValue() {
+            return value;
+        }
+
+        public static MessageType fromValue(int value) {
+            for (MessageType type : MessageType.values()) {
+                if (type.value == value) {
+                    return type;
+                }
+            }
+            throw new IllegalArgumentException("Unexpected value: " + value);
+        }
+    }
+
+    public class ActualMessage {
+        public final int length;
+        public final MessageType type;
+        public final byte[] payload;
+
+        public ActualMessage(int length, MessageType type, byte[] payload) {
+            this.length = length;
+            this.type = type;
+            this.payload = payload;
+        }
+    }
+
+
     private final Peer peer;
 
     MessageManager(Peer peer) {
@@ -19,6 +63,55 @@ public class MessageManager {
         } catch (IOException e) {
             System.out.println(e);
         }
+    }
+
+    public ActualMessage receiveActualMessage(DataInputStream in) {
+        try {
+            int length = in.readInt() - 1; // - 1 compensates for the inclusion of type in the message length
+            int type = in.readByte();
+            byte[] payload = new byte[length];
+            int bytesRead = in.read(payload);
+            if (bytesRead != length) {
+                throw new Exception(String.format("Failed to retrieve expected length: Got %d instead of %d", bytesRead, length));
+            }
+
+            return new ActualMessage(length, MessageType.fromValue(type), payload);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public void sendActualMessage(DataOutputStream out, MessageType type, byte[] payload) {
+        int length = payload.length + 1;
+
+        byte[] lengthBytes = ByteBuffer
+                .allocate(4)
+                .putInt(length)
+                .array();
+
+        byte typeByte = (byte) type.value;
+
+        byte[] actualMessageBytes = ByteBuffer
+                .allocate(4 + 1 + payload.length)
+                .put(lengthBytes)
+                .put(typeByte)
+                .put(payload)
+                .array();
+
+        sendMessage(out, actualMessageBytes);
+    }
+
+    public void sendBitmap(DataOutputStream out) {
+        sendActualMessage(out, MessageType.BITFIELD, peer.getBitmap().getBitfield());
+    }
+
+
+    public Bitmap receiveBitmap(DataInputStream in) {
+        ActualMessage message = receiveActualMessage(in);
+        if (message.type != MessageType.BITFIELD) {
+            throw new RuntimeException(String.format("Did not receive a bitmap but instead got a type of int %b", message.type));
+        }
+        return new Bitmap(message.payload);
     }
 
     public void sendHandshakeMessage(DataOutputStream out) {

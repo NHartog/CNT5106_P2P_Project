@@ -2,6 +2,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.Socket;
+import java.util.Arrays;
 import java.util.HashSet;
 
 public class Receiver implements Runnable {
@@ -39,6 +40,12 @@ public class Receiver implements Runnable {
             // Handshake Done (Note, the connected peers needs to be updated)
             peer.getConnectedPeers().add(connectedPeerID);
             peer.getLogger().logConnectedFromTCP(connectedPeerID);
+
+            // Exchange Bitmaps (Flipped from Sender)
+            Bitmap bitmap = peer.getMessageManager().receiveBitmap(inputStream);
+            peer.getMessageManager().sendBitmap(outputStream);
+
+            System.out.println(Arrays.toString(bitmap.getBitfield()));
 
         } finally {
             try {

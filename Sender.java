@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 public class Sender implements Runnable {
 
@@ -35,6 +36,11 @@ public class Sender implements Runnable {
             // Handshake Done
             peer.getLogger().logMakesConnectionTCP(connectedPeerID);
 
+            // Exchange Bitmaps
+            peer.getMessageManager().sendBitmap(outputStream);
+            Bitmap bitmap = peer.getMessageManager().receiveBitmap(inputStream);
+
+            System.out.println(Arrays.toString(bitmap.getBitfield()));
 
         } finally {
             try {

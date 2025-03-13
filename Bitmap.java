@@ -1,9 +1,8 @@
 import java.util.BitSet;
 
-//TODO want to talk about this code, specifically the bitset stuff
 public class Bitmap {
-    private BitSet bitfield;
-    private int numPieces;
+    private final BitSet bitfield;
+    private final int numPieces;
 
     public Bitmap(int numPieces, boolean hasCompleteFile) {
         this.numPieces = numPieces;
@@ -12,6 +11,17 @@ public class Bitmap {
         // If the peer starts with the full file, mark all pieces as available
         if (hasCompleteFile) {
             bitfield.set(0, numPieces);
+        }
+    }
+
+    public Bitmap(byte[] bitfield) {
+        this.bitfield = new BitSet(bitfield.length);
+        this.numPieces = bitfield.length;
+
+        for(int i = 0; i < bitfield.length; i++) {
+            if(bitfield[i] == 1) {
+                this.bitfield.set(i);
+            }
         }
     }
 
@@ -24,7 +34,13 @@ public class Bitmap {
     }
 
     public byte[] getBitfield() {
-        return bitfield.toByteArray();
+        byte[] bytes = new byte[numPieces];
+        for (int i = 0; i < bytes.length; i++) {
+            if(bitfield.get(i)){
+                bytes[i] = 1;
+            }
+        }
+        return bytes;
     }
 
     // debugging
