@@ -7,11 +7,21 @@ import java.util.Arrays;
 
 public class MessageManager {
 
+    public class Pair<K, V> {
+        public final K first;
+        public final V second;
+
+        public Pair(K first, V second) {
+            this.first = first;
+            this.second = second;
+        }
+    }
+
     public enum MessageType {
-        CHOKE(0),
-        UNCHOKE(1),
-        INTERESTED(2),
-        NOT_INTERESTED(3),
+        CHOKE(0), // No payload
+        UNCHOKE(1), // No payload
+        INTERESTED(2), // No payload
+        NOT_INTERESTED(3), // No payload
         HAVE(4),
         BITFIELD(5),
         REQUEST(6),
@@ -37,17 +47,7 @@ public class MessageManager {
         }
     }
 
-    public class ActualMessage {
-        public final int length;
-        public final MessageType type;
-        public final byte[] payload;
-
-        public ActualMessage(int length, MessageType type, byte[] payload) {
-            this.length = length;
-            this.type = type;
-            this.payload = payload;
-        }
-    }
+    public record ActualMessage(int length, MessageType type, byte[] payload) {}
 
 
     private final Peer peer;
@@ -56,7 +56,7 @@ public class MessageManager {
         this.peer = peer;
     }
 
-    public void sendMessage(DataOutputStream out, byte[] content) {
+    public synchronized void sendMessage(DataOutputStream out, byte[] content) {
         try {
             out.write(content);
             out.flush();
@@ -65,7 +65,7 @@ public class MessageManager {
         }
     }
 
-    public ActualMessage receiveActualMessage(DataInputStream in) {
+    public synchronized ActualMessage receiveActualMessage(DataInputStream in) {
         try {
             int length = in.readInt() - 1; // - 1 compensates for the inclusion of type in the message length
             int type = in.readByte();
@@ -81,7 +81,11 @@ public class MessageManager {
         }
     }
 
-    public void sendActualMessage(DataOutputStream out, MessageType type, byte[] payload) {
+    public synchronized void sendActualMessage(DataOutputStream out, MessageType type) {
+        sendActualMessage(out, type, new byte[0]);
+    }
+
+    public synchronized void sendActualMessage(DataOutputStream out, MessageType type, byte[] payload) {
         int length = payload.length + 1;
 
         byte[] lengthBytes = ByteBuffer
@@ -101,24 +105,98 @@ public class MessageManager {
         sendMessage(out, actualMessageBytes);
     }
 
-    public void sendBitmap(DataOutputStream out) {
+    public synchronized void sendHave(DataOutputStream out, Integer index) {
+        sendActualMessage(out, MessageType.HAVE, new byte[]{index.byteValue()});
+    }
+
+    public synchronized void sendChoke(DataOutputStream out) {
+        sendActualMessage(out, MessageType.CHOKE, new byte[]{});
+    }
+
+    public synchronized void sendUnchoke(DataOutputStream out) {
+        sendActualMessage(out, MessageType.UNCHOKE, new byte[]{});
+    }
+
+    public synchronized int receiveHave(DataInputStream in) {
+        ActualMessage message = receiveActualMessage(in);
+        if (message.type != MessageType.HAVE) {
+            throw new RuntimeException(String.format("Did not receive a HAVE but instead got a type of int %b", message.type));
+        }
+        return getHave(message);
+    }
+
+    public synchronized int getHave(ActualMessage message) {
+        return ByteBuffer.wrap(message.payload(), 0, 4).getInt();
+    }
+
+    public synchronized void sendInterested(DataOutputStream out) {
+        sendActualMessage(out, MessageType.INTERESTED);
+    }
+
+    public synchronized void sendNotInterested(DataOutputStream out) {
+        sendActualMessage(out, MessageType.NOT_INTERESTED);
+    }
+
+    public synchronized void sendRequest(DataOutputStream out, Integer index) {
+        sendActualMessage(out, MessageType.REQUEST, new byte[]{index.byteValue()});
+    }
+
+    public synchronized int receiveRequest(DataInputStream in) {
+        ActualMessage message = receiveActualMessage(in);
+        if (message.type != MessageType.REQUEST) {
+            throw new RuntimeException(String.format("Did not receive a REQUEST but instead got a type of int %b", message.type));
+        }
+        return getReceive(message);
+    }
+
+    public synchronized int getReceive(ActualMessage message) {
+        return ByteBuffer.wrap(message.payload(), 0, 4).getInt();
+    }
+
+    public synchronized void sendPiece(DataOutputStream out, Integer index, byte[] piece) {
+        byte[] bytes = ByteBuffer
+                .allocate(1 + piece.length)
+                .put(new byte[]{index.byteValue()})
+                .put(piece)
+                .array();
+
+        sendActualMessage(out, MessageType.PIECE, bytes);
+    }
+
+    public synchronized Pair<Integer, byte[]> receivePiece(DataInputStream in) {
+        ActualMessage message = receiveActualMessage(in);
+        if (message.type != MessageType.PIECE) {
+            throw new RuntimeException(String.format("Did not receive a PIECE but instead got a type of int %b", message.type));
+        }
+        return getPiece(message);
+    }
+
+    public synchronized Pair<Integer, byte[]> getPiece(ActualMessage message) {
+        return new Pair<>(ByteBuffer.wrap(message.payload(), 0, 4).getInt(), Arrays.copyOfRange(message.payload(), 4, message.payload().length)) ;
+    }
+
+    public synchronized void sendBitmap(DataOutputStream out) {
         sendActualMessage(out, MessageType.BITFIELD, peer.getBitmap().getBitfield());
     }
 
 
-    public Bitmap receiveBitmap(DataInputStream in) {
+    public synchronized Bitmap receiveBitmap(DataInputStream in) {
         ActualMessage message = receiveActualMessage(in);
         if (message.type != MessageType.BITFIELD) {
             throw new RuntimeException(String.format("Did not receive a bitmap but instead got a type of int %b", message.type));
         }
-        return new Bitmap(message.payload);
+        return getBitmap(message);
     }
 
-    public void sendHandshakeMessage(DataOutputStream out) {
+    public synchronized Bitmap getBitmap(ActualMessage message) {
+        return new Bitmap(message.payload(), peer.getNumPieces());
+    }
+
+    public synchronized void sendHandshakeMessage(DataOutputStream out) {
         sendMessage(out, getHandshakeMessage());
     }
 
-    public int receivedValidHandshakeMessage(DataInputStream in, int... validPeerIDs){
+    public synchronized int receivedValidHandshakeMessage(DataInputStream in, int... validPeerIDs){
         byte[] buffer = new byte[32];
         try {
             int bytesRead = in.read(buffer);
@@ -136,7 +214,7 @@ public class MessageManager {
         }
     }
 
-    public byte[] getHandshakeMessage() {
+    public synchronized byte[] getHandshakeMessage() {
         byte[] strBytes = Peer.PeerInfo.HEADER.getBytes(StandardCharsets.UTF_8);
 
         byte[] zeroBytes = ByteBuffer.allocate(10).array();
@@ -154,11 +232,11 @@ public class MessageManager {
         return result;
     }
 
-    public String getHeaderFromHandshakeMessage(byte[] incomingMessage) {
+    public synchronized String getHeaderFromHandshakeMessage(byte[] incomingMessage) {
         return new String(incomingMessage, 0, 18, StandardCharsets.UTF_8);
     }
 
-    public int getPeerIDFromHandshake(byte[] incomingMessage) {
+    public synchronized int getPeerIDFromHandshake(byte[] incomingMessage) {
         return ByteBuffer.wrap(incomingMessage, 28, 4).getInt();
     }
 }
