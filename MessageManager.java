@@ -11,7 +11,7 @@ import java.util.Map;
 
 public class MessageManager {
 
-    public class Pair<K, V> {
+    public static class Pair<K, V> {
         public final K first;
         public final V second;
 
@@ -35,10 +35,6 @@ public class MessageManager {
 
         MessageType(int value) {
             this.value = value;
-        }
-
-        public int getValue() {
-            return value;
         }
 
         public static MessageType fromValue(int value) {
@@ -77,16 +73,24 @@ public class MessageManager {
                 out.write(content);
                 out.flush();
             } catch (IOException e) {
-                System.out.println(e);
+                System.out.println("Something happened when writing to output stream");
             }
         }
 
     }
 
+    public synchronized void closeAll() throws IOException {
+        for(Map.Entry<Integer, DataOutputStream> connection: peerOutputStreams.entrySet()){
+            connection.getValue().close();
+        }
+        for(Map.Entry<Integer, DataInputStream> connection: peerInputStreams.entrySet()){
+            connection.getValue().close();
+        }
+    }
+
     // TODO: Refactor out the data input stream so there can be a synchronized lock on it and see if that fixes any issues
     public ActualMessage receiveActualMessage(Integer peerID) throws Exception {
         DataInputStream in = peerInputStreams.get(peerID);
-        synchronized (in) {
             try {
                 int length = in.readInt() - 1; // - 1 compensates for the inclusion of type in the message length
                 int type = in.readByte();
@@ -97,18 +101,13 @@ public class MessageManager {
                 }
 
                 return new ActualMessage(length, MessageType.fromValue(type), payload);
-            } catch (SocketException e) {
-                System.out.println("Another socket issue???? We are just hoping the program is done");
-                return null;
-            } catch (EOFException e) {
-                System.out.println("There is an end of file... I am hoping its just the socket closed or something");
+            } catch (SocketException | EOFException e) {
                 return null;
             } catch (Exception e) {
                 System.out.println("Definitely concerned about whatever happened here, but we will try to get through it");
-                e.printStackTrace();
                 throw e;
             }
-        }
+
     }
 
     public void sendActualMessage(Integer peerID, MessageType type) {
@@ -191,7 +190,7 @@ public class MessageManager {
     }
 
     public Pair<Integer, byte[]> getPiece(ActualMessage message) {
-        return new Pair<>(ByteBuffer.wrap(message.payload(), 0, 4).getInt(), Arrays.copyOfRange(message.payload(), 4, message.payload().length)) ;
+        return new Pair<>(ByteBuffer.wrap(message.payload(), 0, 4).getInt(), Arrays.copyOfRange(message.payload(), 4, message.payload().length));
     }
 
     public void sendBitmap(Integer peerID) {
@@ -221,7 +220,7 @@ public class MessageManager {
 
                 return correctLength && correctHeader && validPeer ? peerFromHandshake : -1;
             } catch (IOException e) {
-                System.out.println(e);
+                System.out.println("Something happened when reading from input stream");
                 return -1;
             }
         }

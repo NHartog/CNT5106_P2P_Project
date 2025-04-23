@@ -54,34 +54,6 @@ public class Peer {
         return peerInfo;
     }
 
-    public boolean isHasFile() {
-        return hasFile;
-    }
-
-    public int getNumPreferredNeighbors() {
-        return numPreferredNeighbors;
-    }
-
-    public int getUnchokingInterval() {
-        return unchokingInterval;
-    }
-
-    public int getOptimisticUnchokingInterval() {
-        return optimisticUnchokingInterval;
-    }
-
-    public String getFileName() {
-        return fileName;
-    }
-
-    public int getFileSize() {
-        return fileSize;
-    }
-
-    public int getPieceSize() {
-        return pieceSize;
-    }
-
     public int getNumPieces() {
         return numPieces;
     }
@@ -131,6 +103,11 @@ public class Peer {
     private final List<PeerInfo> peers = new ArrayList<>();
     private int indexInConfig = 0;
     private int numConnectedPeers = 0;
+
+    public ServerSocket getServerSocket() {
+        return serverSocket;
+    }
+
     private ServerSocket serverSocket;
 
     public Peer(String ID) {
@@ -155,7 +132,7 @@ public class Peer {
             serverSocket = new ServerSocket(peerInfo.getPort());
             serverSocket.setSoTimeout(500);
         } catch (IOException e) {
-            e.printStackTrace();
+            System.out.println("Something happened with server socket");
         }
     }
 
@@ -188,7 +165,6 @@ public class Peer {
             numPieces = (int) Math.ceil((double) fileSize / (double) pieceSize);
         } catch (IOException e) {
             System.out.println("Error reading common.cfg");
-            System.out.println(e);
         }
     }
 
@@ -221,7 +197,6 @@ public class Peer {
             }
         } catch (IOException e) {
             System.out.println("Error reading PeerInfo.cfg");
-            e.printStackTrace();
         }
     }
 
@@ -241,11 +216,9 @@ public class Peer {
                 messageManager.addInputStream(expectedPeer.getPeerID(), new DataInputStream(socket.getInputStream()));
 
                 executor.submit(new SafeRunnable(new PrimaryConnector(socket, this, expectedPeer.getPeerID(), true)));
-            } catch (IOException e) {
-                e.printStackTrace();
+            } catch (IOException ignored) {
             }
         }
-        System.out.println(peerInfo.getPeerID() + " " + "Exited Sender Handler");
     }
 
     private void createReceivers() {
@@ -271,25 +244,15 @@ public class Peer {
                         messageManager.addInputStream(expectedPeer.getPeerID(), new DataInputStream(socket.getInputStream()));
 
                         executor.submit(new PrimaryConnector(socket, this, expectedPeer.getPeerID(), false));
-                    } catch (SocketException e) {
-                        System.out.println("Socket Exception: " + e.getMessage());
-                        Thread.currentThread().interrupt();
-                    } catch (SocketTimeoutException e) {
-                        System.out.println("No client connected within timeout. Retrying...");
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                        Thread.currentThread().interrupt();
+                    } catch (SocketException | SocketTimeoutException ignored) {
                     } catch (Exception e) {
-                        e.printStackTrace();
                         Thread.currentThread().interrupt();
                         break;
                     }
                 }
             } catch (Exception e) {
-                System.out.println("Task interrupted.");
                 Thread.currentThread().interrupt();
             }
-            System.out.println(peerInfo.getPeerID() + " " + "Exited Receiver Handler");
         }));
     }
 
@@ -297,12 +260,6 @@ public class Peer {
         executor.submit(new SafeRunnable(() -> {
             try {
                 while (!Thread.currentThread().isInterrupted() && !serverSocket.isClosed() && neighbors.getHasCompleteFileNeighbors().size() != getAllPeerInfo().size()) {
-//                System.out.println("Preferred Neighbor Stuff");
-//                System.out.println(neighbors.getHasCompleteFileNeighbors().size() + " needs to equal " + getAllPeerInfo().size());
-//                System.out.println("Missing the following peers: " + getAllPeerInfo().stream().map(PeerInfo::getPeerID).filter(peerID -> !neighbors.getHasCompleteFileNeighbors().contains(peerID)).toList());
-//                neighbors.getPeerBitfield(getAllPeerInfo().stream().map(PeerInfo::getPeerID).filter(peerID -> !neighbors.getHasCompleteFileNeighbors().contains(peerID)).toList().getFirst()).printBitfield();
-                    // TODO: Figure out why peer 1009 is not giving a complete file to all the other peers, preventing them from ending
-
                     if (Thread.currentThread().isInterrupted()) {
                         Thread.currentThread().interrupt();
                         return;
@@ -310,9 +267,7 @@ public class Peer {
                     try {
                         TimeUnit.SECONDS.sleep(unchokingInterval);
                     } catch (InterruptedException e) {
-                        System.out.println("Interrupted while waiting to reselect preferred neighbors");
                         Thread.currentThread().interrupt();
-                        e.printStackTrace();
                         break;
                     }
                     if (Thread.currentThread().isInterrupted()) {
@@ -374,58 +329,53 @@ public class Peer {
                     }
 
                     neighbors.updatePreferredNeighbors(preferredPeerIDs);
+                    logger.logPreferredNeighbors(preferredPeerIDs);
                 }
             } catch (Exception e) {
-                System.out.println("Task interrupted.");
                 Thread.currentThread().interrupt();
             }
-            System.out.println(peerInfo.getPeerID() + " " + "Exited PN Handler");
         }));
     }
 
     private void createONHandler() {
         executor.submit(new SafeRunnable(() -> {
             try {
-            while (!Thread.currentThread().isInterrupted() && !serverSocket.isClosed() && neighbors.getHasCompleteFileNeighbors().size() != getAllPeerInfo().size()) {
-                if (Thread.currentThread().isInterrupted()) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-                try {
-                    TimeUnit.SECONDS.sleep(optimisticUnchokingInterval);
-                } catch (InterruptedException e) {
-                    System.out.println("Interrupted while waiting to reselect optimistic neighbor");
-                    e.printStackTrace();
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-                if (Thread.currentThread().isInterrupted()) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
+                while (!Thread.currentThread().isInterrupted() && !serverSocket.isClosed() && neighbors.getHasCompleteFileNeighbors().size() != getAllPeerInfo().size()) {
+                    if (Thread.currentThread().isInterrupted()) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    try {
+                        TimeUnit.SECONDS.sleep(optimisticUnchokingInterval);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    if (Thread.currentThread().isInterrupted()) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
 
-                List<Integer> ids = neighbors.allChokedAndInterestedNeighbors().stream().toList();
-                if (ids.isEmpty()) {
-                    continue;
+                    List<Integer> ids = neighbors.allChokedAndInterestedNeighbors().stream().toList();
+                    if (ids.isEmpty()) {
+                        continue;
+                    }
+                    Random random = new Random();
+                    int newPeerIndex = random.nextInt(ids.size());
+                    int newPeerID = ids.get(newPeerIndex);
+
+                    int oldPeerID = neighbors.getOptimisticNeighbor() != null ? neighbors.getOptimisticNeighbor() : -1;
+                    if (oldPeerID != -1 && !neighbors.isPreferredNeighbor(oldPeerID)) {
+                        messageManager.sendChoke(oldPeerID);
+                    }
+
+                    messageManager.sendUnchoke(newPeerID);
+                    logger.logUnchokedOptimisticNeighbor(newPeerID);
+                    neighbors.setOptimisticNeighbor(newPeerID);
                 }
-                Random random = new Random();
-                int newPeerIndex = random.nextInt(ids.size());
-                int newPeerID = ids.get(newPeerIndex);
-
-                int oldPeerID = neighbors.getOptimisticNeighbor() != null ? neighbors.getOptimisticNeighbor() : -1;
-                if (oldPeerID != -1 && !neighbors.isPreferredNeighbor(oldPeerID)) {
-                    messageManager.sendChoke(oldPeerID);
-                }
-
-                messageManager.sendUnchoke(newPeerID);
-
-                neighbors.setOptimisticNeighbor(newPeerID);
-            }
             } catch (Exception e) {
-                System.out.println("Task interrupted.");
                 Thread.currentThread().interrupt();
             }
-            System.out.println(peerInfo.getPeerID() + " " + "Exited ON Handler");
         }));
     }
 
@@ -438,7 +388,7 @@ public class Peer {
         createReceivers();
     }
 
-    public class SafeRunnable implements Runnable {
+    public static class SafeRunnable implements Runnable {
         private final Runnable delegate;
 
         public SafeRunnable(Runnable delegate) {
@@ -452,12 +402,6 @@ public class Peer {
             } catch (Exception e) {
                 // log or handle error
                 System.err.println("Task threw exception: " + e);
-            } finally {
-                // Check if we were interrupted
-                if (Thread.currentThread().isInterrupted()) {
-                    System.out.println("Task was interrupted and cleaned up.");
-                    // You can perform cleanup here if needed
-                }
             }
         }
     }

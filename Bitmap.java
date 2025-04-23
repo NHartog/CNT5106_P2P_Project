@@ -22,10 +22,6 @@ public class Bitmap {
         bitfield = BitSet.valueOf(data);
     }
 
-    public boolean hasPiece(int index) {
-        return bitfield.get(index);
-    }
-
     public boolean hasAllPieces() {
         return (bitfield.cardinality() == numPieces);
     }
@@ -75,15 +71,5 @@ public class Bitmap {
 
     public synchronized BitSet getBitset() {
         return bitfield;
-    }
-
-
-    // debugging
-    public void printBitfield() {
-        System.out.println("Current Bitfield: " + bitfield);
-        for(int i = 0; i < bitfield.length(); i++) {
-            System.out.print(bitfield.get(i) + ", ");
-        }
-        System.out.println();
     }
 }

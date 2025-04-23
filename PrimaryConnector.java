@@ -1,8 +1,5 @@
-import java.io.DataInputStream;
-import java.io.EOFException;
 import java.io.IOException;
 import java.net.Socket;
-import java.util.concurrent.TimeUnit;
 
 public class PrimaryConnector implements Runnable {
 
@@ -46,7 +43,6 @@ public class PrimaryConnector implements Runnable {
                 try {
                     MessageManager.ActualMessage message = peer.getMessageManager().receiveActualMessage(connectedPeerID);
                     if (Thread.currentThread().isInterrupted()) {
-                        System.out.println(peer.getPeerInfo().getPeerID() + " " + "Interrupted while waiting to handle actual message");
                         Thread.currentThread().interrupt();
                         break;
                     }
@@ -92,7 +88,6 @@ public class PrimaryConnector implements Runnable {
 
                             // Check if this was the last piece for that peer
                             if (peer.getNeighbors().getPeerBitfield(connectedPeerID).hasAllPieces()) {
-                                System.out.println(peer.getPeerInfo().getPeerID() + " " + connectedPeerID + " has all pieces");
                                 peer.getNeighbors().setHasCompleteFileNeighbors(connectedPeerID);
                             }
                             break;
@@ -102,7 +97,6 @@ public class PrimaryConnector implements Runnable {
                             // Save Bitmap
                             peer.getNeighbors().updatePeerBitfield(connectedPeerID, bitmap);
                             if (peer.getNeighbors().getPeerBitfield(connectedPeerID).hasAllPieces()) {
-                                System.out.println(peer.getPeerInfo().getPeerID() + " " + connectedPeerID + " has all pieces");
                                 peer.getNeighbors().setHasCompleteFileNeighbors(connectedPeerID);
                             }
 
@@ -140,9 +134,8 @@ public class PrimaryConnector implements Runnable {
                             peer.getNeighbors().sendNotInterestedMessages();
 
                             if (peer.getBitmap().hasAllPieces()) {
-                                System.out.println(peer.getPeerInfo().getPeerID() + " " + peer.getPeerInfo().getPeerID() + " has all pieces");
                                 peer.getNeighbors().setHasCompleteFileNeighbors(peer.getPeerInfo().getPeerID());
-                                peer.getLogger().logDownloadedFile(connectedPeerID);
+                                peer.getLogger().logDownloadedFile();
                             }
 
                             // If still interested, request another piece. If not, send not interested
@@ -160,13 +153,7 @@ public class PrimaryConnector implements Runnable {
 
                             break;
                     }
-                } catch (EOFException e) {
-                    System.out.println(peer.getPeerInfo().getPeerID() + " " + "Got an end of file exception again... ignore idt?");
-                    e.printStackTrace();
-                    break;
                 } catch (Exception e) {
-                    System.out.println(peer.getPeerInfo().getPeerID() + " " + "Something happened iterating over the switch case");
-                    e.printStackTrace();
                     break;
                 }
                 if (Thread.currentThread().isInterrupted()) {
@@ -174,9 +161,6 @@ public class PrimaryConnector implements Runnable {
                     return;
                 }
             }
-//            System.out.println(peer.getPeerInfo().getPeerID() + " interrupted " + !Thread.interrupted());
-//            System.out.println(peer.getPeerInfo().getPeerID() + " neighbors " + peer.getNeighbors().getHasCompleteFileNeighbors().size());
-//            System.out.println(peer.getPeerInfo().getPeerID() + " info " + peer.getAllPeerInfo().size());
 
             /*
             * Just some general notes here:
@@ -212,23 +196,15 @@ public class PrimaryConnector implements Runnable {
             * Note it is possible to send a request message and not receive a piece message as neighbors may get re-evaluated, interrupting the expectations
             * */
 
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        finally {
+        } finally {
             try {
-                System.out.println(peer.getPeerInfo().getPeerID() + " " + "Closing Socket");
                 socket.close();
-                System.out.println(peer.getPeerInfo().getPeerID() + " " + "Socket closed");
+                peer.getServerSocket().close();
+                peer.getMessageManager().closeAll();
             } catch (IOException e) {
                 System.out.println(peer.getPeerInfo().getPeerID() + " " + e);
             }
         }
-        if (peer.getNeighbors().getHasCompleteFileNeighbors().size() == peer.getAllPeerInfo().size()) {
-            System.out.println(peer.getPeerInfo().getPeerID() + " " + "IM DONE!!! LETS END THIS THINGS");
-        }
-        System.out.println(peer.getPeerInfo().getPeerID() + " " + "Shutting down executor");
         peer.getExecutor().shutdownNow();
-        System.out.println(peer.getPeerInfo().getPeerID() + " " + "Executor closed");
     }
 }

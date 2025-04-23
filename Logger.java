@@ -3,7 +3,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
+import java.util.List;
 
 public class Logger {
     private final String logFile;
@@ -19,7 +19,6 @@ public class Logger {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(logFile, true))) {
             writer.write(message);
             writer.newLine();
-            System.out.println(message);
         } catch (IOException e) {
             System.out.println("Error writing to log file: " + logFile);
         }
@@ -39,7 +38,7 @@ public class Logger {
     }
 
     // Change of Preferred Neighbors
-    public synchronized void logPreferredNeighbors(ArrayList<Integer> preferredPeerIDs) {
+    public synchronized void logPreferredNeighbors(List<Integer> preferredPeerIDs) {
         String IDs = String.join(" ", preferredPeerIDs.stream().map(String::valueOf).toList());
         logTime(String.format("Peer %d has the preferred neighbors %s.", peerID, IDs));
     }
@@ -77,7 +76,7 @@ public class Logger {
     }
 
     // Completion of Download
-    public synchronized void logDownloadedFile(int connectedPeerID) {
+    public synchronized void logDownloadedFile() {
         logTime(String.format("Peer %d has downloaded the complete file.", peerID));
     }
 }
