@@ -22,12 +22,12 @@ public class Bitmap {
         bitfield = BitSet.valueOf(data);
     }
 
-    public synchronized boolean hasPiece(int index) {
+    public boolean hasPiece(int index) {
         return bitfield.get(index);
     }
 
-    public synchronized boolean hasAllPieces() {
-        return (bitfield.length() == numPieces) && (bitfield.nextClearBit(0) >= numPieces);
+    public boolean hasAllPieces() {
+        return (bitfield.cardinality() == numPieces);
     }
 
     public synchronized boolean containsInterestedPieces(Bitmap bitmap) {
@@ -42,9 +42,10 @@ public class Bitmap {
 
     public synchronized List<Integer> getRemainingPieces(Bitmap bitmap) {
         List<Integer> indices = new ArrayList<>();
-        for (int i = bitfield.nextClearBit(0); i >= 0; i = bitfield.nextClearBit(i + 1)) {
-            // The past bitmap must contain the missing piece
-            if (bitmap.getBitset().get(i)){
+        // Checking against the bitmap that has more pieces, go through all the set pieces in the given bitmap to see if
+        // any of those pieces are missing from the current bitfield.
+        for (int i = bitmap.getBitset().nextSetBit(0); i >= 0 && i < bitmap.getBitset().length(); i = bitmap.getBitset().nextSetBit(i + 1)) {
+            if (!bitfield.get(i)) {
                 indices.add(i);
             }
         }
@@ -55,6 +56,9 @@ public class Bitmap {
     public synchronized Integer getRandomRemainingPiece(Bitmap bitmap) {
         List<Integer> indices = getRemainingPieces(bitmap);
 
+        if (indices.isEmpty()) {
+            return -1;
+        }
         Random random = new Random();
         int randomIndex = random.nextInt(indices.size());
 
@@ -75,7 +79,7 @@ public class Bitmap {
 
 
     // debugging
-    public synchronized void printBitfield() {
+    public void printBitfield() {
         System.out.println("Current Bitfield: " + bitfield);
         for(int i = 0; i < bitfield.length(); i++) {
             System.out.print(bitfield.get(i) + ", ");

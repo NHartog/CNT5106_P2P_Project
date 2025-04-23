@@ -1,42 +1,24 @@
-import java.io.FileNotFoundException;
-import java.io.IOException;
 import java.io.RandomAccessFile;
 
 public class FileManager {
-    private int peerID;
-    private String filePath;
-    private int fileSize;
-    private int pieceSize;
-    private int numPieces;
-    private boolean containsInitialFile;
+    private final String filePath;
+    private final int fileSize;
+    private final int pieceSize;
+    private final boolean containsInitialFile;
 
+    // TODO: Somethign is wrong here idk what
     public FileManager(int peerID, String fileName, int fileSize, int pieceSize, int numPieces, boolean containsInitialFile) {
-        this.peerID = peerID;
         this.filePath = "peer_" + peerID + "/" + fileName;
         this.fileSize = fileSize;
         this.pieceSize = pieceSize;
-        this.numPieces = numPieces;
         this.containsInitialFile = containsInitialFile;
-
-        if (!containsInitialFile) {
-            intializeFileLength();
-        }
-    }
-
-    private synchronized void intializeFileLength() {
-        try (RandomAccessFile outputFile = new RandomAccessFile(filePath, "rw")) {
-            outputFile.setLength(fileSize);
-        } catch (Exception e) {
-            System.out.println("File not found issue with initializing file length");
-            e.printStackTrace();
-        }
     }
 
     public synchronized byte[] readPiece(Integer pieceIndex) {
         try (RandomAccessFile sourceFile = new RandomAccessFile(filePath, "r")) {
             long startByte = (long) pieceIndex * pieceSize;
             if (startByte >= sourceFile.length()) {
-                System.out.println("Start byte is beyond file size.");
+                System.out.println("Start byte is beyond file size. " + startByte + " " + pieceIndex);
                 return new byte[0];
             }
 
@@ -54,9 +36,13 @@ public class FileManager {
     }
 
     public synchronized void writePiece(Integer pieceIndex, byte[] data) {
-        if (!containsInitialFile) { // Never write to a an original file to avoid problems. This is only for this project
+        if (!containsInitialFile) { // Never write to an original file to avoid problems. This is only for this project
             try (RandomAccessFile outputFile = new RandomAccessFile(filePath, "rw")) {
-                outputFile.seek(pieceIndex + pieceSize);
+                long startByte = (long) pieceIndex * pieceSize;
+                if (startByte + data.length > outputFile.length()) {
+                    outputFile.setLength(startByte + data.length);
+                }
+                outputFile.seek(startByte);
                 outputFile.write(data);
             } catch (Exception e) {
                 System.out.println("File not found issue with writing piece to file");

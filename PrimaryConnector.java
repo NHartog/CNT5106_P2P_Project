@@ -1,12 +1,11 @@
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
 import java.net.Socket;
+import java.util.concurrent.TimeUnit;
 
 public class PrimaryConnector implements Runnable {
 
-    private final DataOutputStream outputStream;
-    private final DataInputStream inputStream;
     private final Socket socket;
     private final Peer peer;
     private final int expectedPeerID;
@@ -14,8 +13,6 @@ public class PrimaryConnector implements Runnable {
 
     public PrimaryConnector(Socket socket, Peer peer, int expectedPeerID, boolean madeTCPConnection) throws IOException {
         this.peer = peer;
-        this.outputStream = new DataOutputStream(socket.getOutputStream());
-        this.inputStream = new DataInputStream(socket.getInputStream());
         this.expectedPeerID = expectedPeerID;
         this.socket = socket;
 
@@ -30,9 +27,9 @@ public class PrimaryConnector implements Runnable {
         try {
             // Handshake
             // Send Shake Message
-            peer.getMessageManager().sendHandshakeMessage(outputStream);
+            peer.getMessageManager().sendHandshakeMessage(expectedPeerID);
             // Receive Shake Message
-            int connectedPeerID = peer.getMessageManager().receivedValidHandshakeMessage(inputStream, expectedPeerID);
+            int connectedPeerID = peer.getMessageManager().receivedValidHandshakeMessage(expectedPeerID, expectedPeerID);
             if (connectedPeerID == -1) return;
 
             // Log Handshake Done
@@ -43,25 +40,33 @@ public class PrimaryConnector implements Runnable {
             }
 
             // Send Bitmap
-            peer.getMessageManager().sendBitmap(outputStream);
-
-            System.out.println("Peer Info Size" + peer.getAllPeerInfo().size());
-            System.out.println("Peer Complete File" + peer.getNeighbors().getHasCompleteFileNeighbors().size());
-            while (peer.getNeighbors().getHasCompleteFileNeighbors().size() != peer.getAllPeerInfo().size()) {
+            peer.getMessageManager().sendBitmap(connectedPeerID);
+            
+            while (!Thread.currentThread().isInterrupted() && peer.getNeighbors().getHasCompleteFileNeighbors().size() != peer.getAllPeerInfo().size()) {
                 try {
-                    MessageManager.ActualMessage message = peer.getMessageManager().receiveActualMessage(inputStream);
+                    MessageManager.ActualMessage message = peer.getMessageManager().receiveActualMessage(connectedPeerID);
+                    if (Thread.currentThread().isInterrupted()) {
+                        System.out.println(peer.getPeerInfo().getPeerID() + " " + "Interrupted while waiting to handle actual message");
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                    if (message == null) {
+                        break;
+                    }
                     switch (message.type()) {
                         case CHOKE:
-//                            peer.getNeighbors().setChokedStatus(connectedPeerID, true);
                             peer.getLogger().logChoking(connectedPeerID);
                             break;
                         case UNCHOKE:
-//                            peer.getNeighbors().setChokedStatus(connectedPeerID, false);
                             peer.getLogger().logUnchoking(connectedPeerID);
 
-                            Integer randomPiece = peer.getBitmap().getRandomRemainingPiece(peer.getNeighbors().getPeerBitfield(connectedPeerID));
+                            int randomPiece = peer.getBitmap().getRandomRemainingPiece(peer.getNeighbors().getPeerBitfield(connectedPeerID));
 
-                            peer.getMessageManager().sendRequest(outputStream, randomPiece);
+                            if (randomPiece == -1) {
+                                continue;
+                            }
+
+                            peer.getMessageManager().sendRequest(connectedPeerID, randomPiece);
                             break;
                         case INTERESTED:
                             peer.getNeighbors().setInterestOfNeighbor(connectedPeerID, true);
@@ -73,11 +78,21 @@ public class PrimaryConnector implements Runnable {
                             break;
                         case HAVE:
                             int pieceID = peer.getMessageManager().getHave(message);
+                            if (pieceID < 0 || pieceID > peer.getNumPieces()) {
+                                continue; // Just skip this if the piece comes in bad
+                            }
                             peer.getNeighbors().updatePeerBitfield(connectedPeerID, pieceID);
                             peer.getLogger().logReceivedHave(connectedPeerID, pieceID);
 
+                            if (peer.getBitmap().containsInterestedPieces(peer.getNeighbors().getPeerBitfield(connectedPeerID))) {
+                                peer.getMessageManager().sendInterested(connectedPeerID);
+                            } else {
+                                peer.getMessageManager().sendNotInterested(connectedPeerID);
+                            }
+
                             // Check if this was the last piece for that peer
                             if (peer.getNeighbors().getPeerBitfield(connectedPeerID).hasAllPieces()) {
+                                System.out.println(peer.getPeerInfo().getPeerID() + " " + connectedPeerID + " has all pieces");
                                 peer.getNeighbors().setHasCompleteFileNeighbors(connectedPeerID);
                             }
                             break;
@@ -86,55 +101,82 @@ public class PrimaryConnector implements Runnable {
 
                             // Save Bitmap
                             peer.getNeighbors().updatePeerBitfield(connectedPeerID, bitmap);
+                            if (peer.getNeighbors().getPeerBitfield(connectedPeerID).hasAllPieces()) {
+                                System.out.println(peer.getPeerInfo().getPeerID() + " " + connectedPeerID + " has all pieces");
+                                peer.getNeighbors().setHasCompleteFileNeighbors(connectedPeerID);
+                            }
 
                             // Decide if interested
                             if (peer.getBitmap().containsInterestedPieces(bitmap)) {
-                                peer.getMessageManager().sendInterested(outputStream);
+                                peer.getMessageManager().sendInterested(connectedPeerID);
                             } else {
-                                peer.getMessageManager().sendNotInterested(outputStream);
+                                peer.getMessageManager().sendNotInterested(connectedPeerID);
                             }
                             break;
                         case REQUEST:
-                            Integer requestedPiece = peer.getMessageManager().getReceive(message);
-
+                            int requestedPiece = peer.getMessageManager().getReceive(message);
+                            if (requestedPiece < 0 || requestedPiece > peer.getNumPieces()) {
+                                continue; // Just skip this if the piece comes in bad
+                            }
                             byte[] requestedData = peer.getFileManager().readPiece(requestedPiece);
 
-                            peer.getMessageManager().sendPiece(outputStream, requestedPiece, requestedData);
+                            peer.getMessageManager().sendPiece(connectedPeerID, requestedPiece, requestedData);
                             break;
                         case PIECE:
 
                             MessageManager.Pair<Integer, byte[]> content = peer.getMessageManager().getPiece(message);
 
-                            Integer receivedPiece = content.first;
+                            int receivedPiece = content.first;
                             byte[] receivedData = content.second;
+                            if (receivedPiece < 0 || receivedPiece > peer.getNumPieces()) {
+                                continue; // Just skip this if the piece comes in bad
+                            }
 
                             peer.getFileManager().writePiece(receivedPiece, receivedData);
                             peer.getBitmap().markPieceAsReceived(receivedPiece);
                             peer.getNeighbors().incrementNumOfPiecesByPeer(connectedPeerID);
                             peer.getLogger().logDownloadedPiece(connectedPeerID, receivedPiece, peer.getBitmap().getBitset().cardinality());
                             peer.getNeighbors().sendHaveMessages(receivedPiece);
+                            peer.getNeighbors().sendNotInterestedMessages();
 
                             if (peer.getBitmap().hasAllPieces()) {
+                                System.out.println(peer.getPeerInfo().getPeerID() + " " + peer.getPeerInfo().getPeerID() + " has all pieces");
                                 peer.getNeighbors().setHasCompleteFileNeighbors(peer.getPeerInfo().getPeerID());
                                 peer.getLogger().logDownloadedFile(connectedPeerID);
                             }
 
                             // If still interested, request another piece. If not, send not interested
                             if (peer.getBitmap().containsInterestedPieces(peer.getNeighbors().getPeerBitfield(connectedPeerID))) {
-                                Integer randomNextPiece = peer.getBitmap().getRandomRemainingPiece(peer.getNeighbors().getPeerBitfield(connectedPeerID));
+                                int randomNextPiece = peer.getBitmap().getRandomRemainingPiece(peer.getNeighbors().getPeerBitfield(connectedPeerID));
 
-                                peer.getMessageManager().sendRequest(outputStream, randomNextPiece);
+                                if (randomNextPiece == -1) {
+                                    continue;
+                                }
+
+                                peer.getMessageManager().sendRequest(connectedPeerID, randomNextPiece);
                             } else {
-                                peer.getMessageManager().sendNotInterested(outputStream);
+                                peer.getMessageManager().sendNotInterested(connectedPeerID);
                             }
 
                             break;
                     }
-                } catch (Exception e) {
-                    System.out.println("Something happened iterating over the switch case");
+                } catch (EOFException e) {
+                    System.out.println(peer.getPeerInfo().getPeerID() + " " + "Got an end of file exception again... ignore idt?");
                     e.printStackTrace();
+                    break;
+                } catch (Exception e) {
+                    System.out.println(peer.getPeerInfo().getPeerID() + " " + "Something happened iterating over the switch case");
+                    e.printStackTrace();
+                    break;
+                }
+                if (Thread.currentThread().isInterrupted()) {
+                    Thread.currentThread().interrupt();
+                    return;
                 }
             }
+//            System.out.println(peer.getPeerInfo().getPeerID() + " interrupted " + !Thread.interrupted());
+//            System.out.println(peer.getPeerInfo().getPeerID() + " neighbors " + peer.getNeighbors().getHasCompleteFileNeighbors().size());
+//            System.out.println(peer.getPeerInfo().getPeerID() + " info " + peer.getAllPeerInfo().size());
 
             /*
             * Just some general notes here:
@@ -170,14 +212,23 @@ public class PrimaryConnector implements Runnable {
             * Note it is possible to send a request message and not receive a piece message as neighbors may get re-evaluated, interrupting the expectations
             * */
 
-        } finally {
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        finally {
             try {
+                System.out.println(peer.getPeerInfo().getPeerID() + " " + "Closing Socket");
                 socket.close();
+                System.out.println(peer.getPeerInfo().getPeerID() + " " + "Socket closed");
             } catch (IOException e) {
-                System.out.println(e);
+                System.out.println(peer.getPeerInfo().getPeerID() + " " + e);
             }
         }
-
-        System.exit(0);
+        if (peer.getNeighbors().getHasCompleteFileNeighbors().size() == peer.getAllPeerInfo().size()) {
+            System.out.println(peer.getPeerInfo().getPeerID() + " " + "IM DONE!!! LETS END THIS THINGS");
+        }
+        System.out.println(peer.getPeerInfo().getPeerID() + " " + "Shutting down executor");
+        peer.getExecutor().shutdownNow();
+        System.out.println(peer.getPeerInfo().getPeerID() + " " + "Executor closed");
     }
 }

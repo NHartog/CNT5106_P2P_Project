@@ -1,9 +1,13 @@
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.IOException;
+import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MessageManager {
 
@@ -51,41 +55,67 @@ public class MessageManager {
 
 
     private final Peer peer;
+    private final Map<Integer, DataOutputStream> peerOutputStreams = new HashMap<>();
+    private final Map<Integer, DataInputStream> peerInputStreams = new HashMap<>();
 
     MessageManager(Peer peer) {
         this.peer = peer;
     }
 
-    public synchronized void sendMessage(DataOutputStream out, byte[] content) {
-        try {
-            out.write(content);
-            out.flush();
-        } catch (IOException e) {
-            System.out.println(e);
-        }
+    public synchronized void addOutputStream(Integer peerID, DataOutputStream out) {
+        peerOutputStreams.put(peerID, out);
     }
 
-    public synchronized ActualMessage receiveActualMessage(DataInputStream in) {
-        try {
-            int length = in.readInt() - 1; // - 1 compensates for the inclusion of type in the message length
-            int type = in.readByte();
-            byte[] payload = new byte[length];
-            int bytesRead = in.read(payload);
-            if (bytesRead != length) {
-                throw new Exception(String.format("Failed to retrieve expected length: Got %d instead of %d", bytesRead, length));
+    public synchronized void addInputStream(Integer peerID, DataInputStream in) {
+        peerInputStreams.put(peerID, in);
+    }
+
+    public synchronized void sendMessage(Integer peerID, byte[] content) {
+        DataOutputStream out = peerOutputStreams.get(peerID);
+        synchronized (out) {
+            try {
+                out.write(content);
+                out.flush();
+            } catch (IOException e) {
+                System.out.println(e);
             }
+        }
 
-            return new ActualMessage(length, MessageType.fromValue(type), payload);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+    }
+
+    // TODO: Refactor out the data input stream so there can be a synchronized lock on it and see if that fixes any issues
+    public ActualMessage receiveActualMessage(Integer peerID) throws Exception {
+        DataInputStream in = peerInputStreams.get(peerID);
+        synchronized (in) {
+            try {
+                int length = in.readInt() - 1; // - 1 compensates for the inclusion of type in the message length
+                int type = in.readByte();
+                byte[] payload = new byte[length];
+                int bytesRead = in.read(payload);
+                if (bytesRead != length) {
+                    throw new Exception(String.format("Failed to retrieve expected length: Got %d instead of %d", bytesRead, length));
+                }
+
+                return new ActualMessage(length, MessageType.fromValue(type), payload);
+            } catch (SocketException e) {
+                System.out.println("Another socket issue???? We are just hoping the program is done");
+                return null;
+            } catch (EOFException e) {
+                System.out.println("There is an end of file... I am hoping its just the socket closed or something");
+                return null;
+            } catch (Exception e) {
+                System.out.println("Definitely concerned about whatever happened here, but we will try to get through it");
+                e.printStackTrace();
+                throw e;
+            }
         }
     }
 
-    public synchronized void sendActualMessage(DataOutputStream out, MessageType type) {
-        sendActualMessage(out, type, new byte[0]);
+    public void sendActualMessage(Integer peerID, MessageType type) {
+        sendActualMessage(peerID, type, new byte[0]);
     }
 
-    public synchronized void sendActualMessage(DataOutputStream out, MessageType type, byte[] payload) {
+    public void sendActualMessage(Integer peerID, MessageType type, byte[] payload) {
         int length = payload.length + 1;
 
         byte[] lengthBytes = ByteBuffer
@@ -102,119 +132,102 @@ public class MessageManager {
                 .put(payload)
                 .array();
 
-        sendMessage(out, actualMessageBytes);
+        sendMessage(peerID, actualMessageBytes);
     }
 
-    public synchronized void sendHave(DataOutputStream out, Integer index) {
-        sendActualMessage(out, MessageType.HAVE, new byte[]{index.byteValue()});
+    public void sendHave(Integer peerID, Integer index) {
+        ByteBuffer buffer = ByteBuffer.allocate(4);  // 4 bytes for an int
+        buffer.putInt(index);
+        sendActualMessage(peerID, MessageType.HAVE, buffer.array());
     }
 
-    public synchronized void sendChoke(DataOutputStream out) {
-        sendActualMessage(out, MessageType.CHOKE, new byte[]{});
+    public void sendChoke(Integer peerID) {
+        sendActualMessage(peerID, MessageType.CHOKE, new byte[]{});
     }
 
-    public synchronized void sendUnchoke(DataOutputStream out) {
-        sendActualMessage(out, MessageType.UNCHOKE, new byte[]{});
+    public void sendUnchoke(Integer peerID) {
+        sendActualMessage(peerID, MessageType.UNCHOKE, new byte[]{});
     }
 
-    public synchronized int receiveHave(DataInputStream in) {
-        ActualMessage message = receiveActualMessage(in);
-        if (message.type != MessageType.HAVE) {
-            throw new RuntimeException(String.format("Did not receive a HAVE but instead got a type of int %b", message.type));
-        }
-        return getHave(message);
-    }
-
-    public synchronized int getHave(ActualMessage message) {
+    public int getHave(ActualMessage message) {
         return ByteBuffer.wrap(message.payload(), 0, 4).getInt();
     }
 
-    public synchronized void sendInterested(DataOutputStream out) {
-        sendActualMessage(out, MessageType.INTERESTED);
-    }
-
-    public synchronized void sendNotInterested(DataOutputStream out) {
-        sendActualMessage(out, MessageType.NOT_INTERESTED);
-    }
-
-    public synchronized void sendRequest(DataOutputStream out, Integer index) {
-        sendActualMessage(out, MessageType.REQUEST, new byte[]{index.byteValue()});
-    }
-
-    public synchronized int receiveRequest(DataInputStream in) {
-        ActualMessage message = receiveActualMessage(in);
-        if (message.type != MessageType.REQUEST) {
-            throw new RuntimeException(String.format("Did not receive a REQUEST but instead got a type of int %b", message.type));
+    public void sendInterested(Integer peerID) {
+        if (!peer.getNeighbors().getInterestingNeighbors().contains(peerID)) {
+            sendActualMessage(peerID, MessageType.INTERESTED);
+            peer.getNeighbors().setInterestingNeighbor(peerID, true);
         }
-        return getReceive(message);
     }
 
-    public synchronized int getReceive(ActualMessage message) {
+    public void sendNotInterested(Integer peerID) {
+        if (!peer.getNeighbors().getNotInterestingNeighbors().contains(peerID)) {
+            sendActualMessage(peerID, MessageType.NOT_INTERESTED);
+            peer.getNeighbors().setInterestingNeighbor(peerID, false);
+        }
+    }
+
+    public void sendRequest(Integer peerID, Integer index) {
+        ByteBuffer buffer = ByteBuffer.allocate(4);  // 4 bytes for an int
+        buffer.putInt(index);
+        sendActualMessage(peerID, MessageType.REQUEST, buffer.array());
+    }
+
+    public int getReceive(ActualMessage message) {
         return ByteBuffer.wrap(message.payload(), 0, 4).getInt();
     }
 
-    public synchronized void sendPiece(DataOutputStream out, Integer index, byte[] piece) {
+    public void sendPiece(Integer peerID, Integer index, byte[] piece) {
+        ByteBuffer buffer = ByteBuffer.allocate(4);  // 4 bytes for an int
+        buffer.putInt(index);
+
         byte[] bytes = ByteBuffer
-                .allocate(1 + piece.length)
-                .put(new byte[]{index.byteValue()})
+                .allocate(4 + piece.length)
+                .put(buffer.array())
                 .put(piece)
                 .array();
 
-        sendActualMessage(out, MessageType.PIECE, bytes);
+        sendActualMessage(peerID, MessageType.PIECE, bytes);
     }
 
-    public synchronized Pair<Integer, byte[]> receivePiece(DataInputStream in) {
-        ActualMessage message = receiveActualMessage(in);
-        if (message.type != MessageType.PIECE) {
-            throw new RuntimeException(String.format("Did not receive a PIECE but instead got a type of int %b", message.type));
-        }
-        return getPiece(message);
-    }
-
-    public synchronized Pair<Integer, byte[]> getPiece(ActualMessage message) {
+    public Pair<Integer, byte[]> getPiece(ActualMessage message) {
         return new Pair<>(ByteBuffer.wrap(message.payload(), 0, 4).getInt(), Arrays.copyOfRange(message.payload(), 4, message.payload().length)) ;
     }
 
-    public synchronized void sendBitmap(DataOutputStream out) {
-        sendActualMessage(out, MessageType.BITFIELD, peer.getBitmap().getBitfield());
+    public void sendBitmap(Integer peerID) {
+        sendActualMessage(peerID, MessageType.BITFIELD, peer.getBitmap().getBitfield());
     }
 
-
-    public synchronized Bitmap receiveBitmap(DataInputStream in) {
-        ActualMessage message = receiveActualMessage(in);
-        if (message.type != MessageType.BITFIELD) {
-            throw new RuntimeException(String.format("Did not receive a bitmap but instead got a type of int %b", message.type));
-        }
-        return getBitmap(message);
-    }
-
-    public synchronized Bitmap getBitmap(ActualMessage message) {
+    public Bitmap getBitmap(ActualMessage message) {
         return new Bitmap(message.payload(), peer.getNumPieces());
     }
 
-    public synchronized void sendHandshakeMessage(DataOutputStream out) {
-        sendMessage(out, getHandshakeMessage());
+    public void sendHandshakeMessage(Integer peerID) {
+        sendMessage(peerID, getHandshakeMessage());
     }
 
-    public synchronized int receivedValidHandshakeMessage(DataInputStream in, int... validPeerIDs){
-        byte[] buffer = new byte[32];
-        try {
-            int bytesRead = in.read(buffer);
-            boolean correctLength = bytesRead == 32;
-            boolean correctHeader = Peer.PeerInfo.HEADER.equals(getHeaderFromHandshakeMessage(buffer));
+    public int receivedValidHandshakeMessage(Integer peerID, int... validPeerIDs){
+        DataInputStream in = peerInputStreams.get(peerID);
+        synchronized (in) {
+            byte[] buffer = new byte[32];
+            try {
+                int bytesRead = in.read(buffer);
+                boolean correctLength = bytesRead == 32;
+                boolean correctHeader = Peer.PeerInfo.HEADER.equals(getHeaderFromHandshakeMessage(buffer));
 
-            // A valid Peer is considered a peer that is expected for a connection
-            int peerFromHandshake = getPeerIDFromHandshake(buffer);
-            boolean validPeer = Arrays.stream(validPeerIDs).anyMatch(id -> id == peerFromHandshake);
+                // A valid Peer is considered a peer that is expected for a connection
+                int peerFromHandshake = getPeerIDFromHandshake(buffer);
+                boolean validPeer = Arrays.stream(validPeerIDs).anyMatch(id -> id == peerFromHandshake);
 
-            return correctLength && correctHeader && validPeer ? peerFromHandshake : -1;
-        } catch (IOException e) {
-            System.out.println(e);
-            return -1;
+                return correctLength && correctHeader && validPeer ? peerFromHandshake : -1;
+            } catch (IOException e) {
+                System.out.println(e);
+                return -1;
+            }
         }
     }
 
-    public synchronized byte[] getHandshakeMessage() {
+    public byte[] getHandshakeMessage() {
         byte[] strBytes = Peer.PeerInfo.HEADER.getBytes(StandardCharsets.UTF_8);
 
         byte[] zeroBytes = ByteBuffer.allocate(10).array();
@@ -232,11 +245,11 @@ public class MessageManager {
         return result;
     }
 
-    public synchronized String getHeaderFromHandshakeMessage(byte[] incomingMessage) {
+    public String getHeaderFromHandshakeMessage(byte[] incomingMessage) {
         return new String(incomingMessage, 0, 18, StandardCharsets.UTF_8);
     }
 
-    public synchronized int getPeerIDFromHandshake(byte[] incomingMessage) {
+    public int getPeerIDFromHandshake(byte[] incomingMessage) {
         return ByteBuffer.wrap(incomingMessage, 28, 4).getInt();
     }
 }

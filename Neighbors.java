@@ -1,15 +1,15 @@
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
 import java.net.Socket;
 import java.util.*;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 public class Neighbors {
     private Peer peer;
     private final HashMap<Integer, Socket> connectedPeers = new HashMap<>();
     private final HashMap<Integer, Bitmap> peerBitmaps = new HashMap<>();
     private final HashMap<Integer, Integer> numOfPiecesByPeer = new HashMap<>();
+    // This set tracks whether the current peer is already interested in any neighbors
+    private final HashMap<Integer, String> interestingNeighbors = new HashMap<>();
     private final Set<Integer> preferredNeighbors = new HashSet<>();
     private final Set<Integer> interestedNeighbors = new HashSet<>();
     private final Set<Integer> chokedStatus = new HashSet<>();
@@ -23,7 +23,10 @@ public class Neighbors {
             if(peer.getPeerInfo().getPeerID() == info.getPeerID()) {
                 continue; // skip current peer
             }
+            interestingNeighbors.put(info.getPeerID(), null);
+            peerBitmaps.put(info.getPeerID(), new Bitmap(new byte[0], peer.getNumPieces()));
             chokedStatus.add(info.getPeerID()); // all neighbors start choked
+            numOfPiecesByPeer.put(info.getPeerID(), 0);
         }
     }
 
@@ -41,11 +44,11 @@ public class Neighbors {
         updateCompleteFileNeighbors();
     }
 
-    public synchronized Bitmap getPeerBitfield(int peerID) {
+    public Bitmap getPeerBitfield(int peerID) {
         return peerBitmaps.get(peerID);
     }
 
-    public synchronized Map<Integer, Socket> getConnectedPeers() {
+    public Map<Integer, Socket> getConnectedPeers() {
         return connectedPeers;
     }
 
@@ -54,15 +57,15 @@ public class Neighbors {
         preferredNeighbors.addAll(newPreferred);
     }
 
-    public synchronized boolean isPreferredNeighbor(int peerID) {
+    public boolean isPreferredNeighbor(int peerID) {
         return preferredNeighbors.contains(peerID);
     }
 
-    public synchronized Set<Integer> getPreferredNeighbors() {
+    public Set<Integer> getPreferredNeighbors() {
         return preferredNeighbors;
     }
 
-    public synchronized Integer getOptimisticNeighbor() {
+    public Integer getOptimisticNeighbor() {
         return optimisticNeighbor;
     }
 
@@ -70,8 +73,22 @@ public class Neighbors {
         this.optimisticNeighbor = optimisticNeighbor;
     }
 
-    public synchronized Set<Integer> getInterestedNeighbors() {
+    public Set<Integer> getInterestedNeighbors() {
         return interestedNeighbors;
+    }
+
+    public Set<Integer> getInterestingNeighbors() {
+        return interestingNeighbors.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && "interesting".equals(entry.getValue()))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+    }
+
+    public Set<Integer> getNotInterestingNeighbors() {
+        return interestingNeighbors.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && "not interesting".equals(entry.getValue()))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
     }
 
     public synchronized void setInterestOfNeighbor(Integer peerID, boolean isInterested) {
@@ -79,8 +96,12 @@ public class Neighbors {
         action.accept(peerID);
     }
 
+    public synchronized void setInterestingNeighbor(Integer peerID, boolean isInteresting) {
+        interestingNeighbors.put(peerID, isInteresting ? "interesting" : "not interesting");
+    }
+
     // Returns a set of peer IDs that represent the neighbors that view me as a choked neighbor
-    public synchronized Set<Integer> getChokedStatus() {
+    public Set<Integer> getChokedStatus() {
         return chokedStatus;
     }
 
@@ -89,7 +110,7 @@ public class Neighbors {
         action.accept(peerID);
     }
 
-    public synchronized HashMap<Integer, Integer> getNumOfPiecesByPeer() {
+    public HashMap<Integer, Integer> getNumOfPiecesByPeer() {
         return numOfPiecesByPeer;
     }
 
@@ -99,9 +120,15 @@ public class Neighbors {
 
     public synchronized void resetNumOfPiecesByPeer() {
         numOfPiecesByPeer.clear();
+        for(Peer.PeerInfo info : peer.getAllPeerInfo()) {
+            if(peer.getPeerInfo().getPeerID() == info.getPeerID()) {
+                continue; // skip current peer
+            }
+            numOfPiecesByPeer.put(info.getPeerID(), 0);
+        }
     }
 
-    public synchronized Set<Integer> getHasCompleteFileNeighbors() {
+    public Set<Integer> getHasCompleteFileNeighbors() {
         return hasCompleteFileNeighbors;
     }
 
@@ -128,19 +155,33 @@ public class Neighbors {
                 continue;
             }
 
-            Socket socket = connection.getValue();
-            try (DataOutputStream outputStream = new DataOutputStream(socket.getOutputStream())) {
-                peer.getMessageManager().sendHave(outputStream, pieceIndex);
-            } catch (IOException e) {
-                System.out.println("Something happened with sending have messages");
-                e.printStackTrace();
+            peer.getMessageManager().sendHave(peerID, pieceIndex);
+        }
+    }
+
+    public synchronized void sendNotInterestedMessages() {
+        for(Map.Entry<Integer, Socket> connection : connectedPeers.entrySet()) {
+            Integer peerID = connection.getKey();
+
+            if (peerID == peer.getPeerInfo().getPeerID()){ // Skip the current peer
+                continue;
+            }
+
+            if (!peer.getBitmap().containsInterestedPieces(getPeerBitfield(peerID))) {
+                peer.getMessageManager().sendNotInterested(peerID);
             }
         }
     }
 
-    public synchronized Set<Integer> allChokedAndInterestedNeighbors(){
-        Set<Integer> intersection = new HashSet<>(chokedStatus); // Start with all currently choked neighbors
+    public Set<Integer> allChokedAndInterestedNeighbors(){
+        Set<Integer> unchoked = new HashSet<>(preferredNeighbors);
+        unchoked.add(optimisticNeighbor);
+        Set<Integer> choked = peer.getAllPeerInfo().stream().map((Peer.PeerInfo::getPeerID)).collect(Collectors.toSet());
+        choked.removeAll(unchoked);
+
+        Set<Integer> intersection = new HashSet<>(choked); // Start with all currently choked neighbors
         intersection.retainAll(interestedNeighbors);  // keep only IDs that are also interested
+        intersection.retainAll(connectedPeers.keySet()); // only look at the neighbors that you are actually connected to
         return intersection;
     }
 }
