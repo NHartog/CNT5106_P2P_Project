@@ -1,15 +1,16 @@
 import java.net.Socket;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class Neighbors {
     private Peer peer;
-    private final HashMap<Integer, Socket> connectedPeers = new HashMap<>();
-    private final HashMap<Integer, Bitmap> peerBitmaps = new HashMap<>();
-    private final HashMap<Integer, Integer> numOfPiecesByPeer = new HashMap<>();
+    private final Map<Integer, Socket> connectedPeers = new ConcurrentHashMap<>();
+    private final Map<Integer, Bitmap> peerBitmaps = new ConcurrentHashMap<>();
+    private final Map<Integer, Integer> numOfPiecesByPeer = new ConcurrentHashMap<>();
     // This set tracks whether the current peer is already interested in any neighbors
-    private final HashMap<Integer, String> interestingNeighbors = new HashMap<>();
+    private final Map<Integer, String> interestingNeighbors = new ConcurrentHashMap<>();
     private final Set<Integer> preferredNeighbors = new HashSet<>();
     private final Set<Integer> interestedNeighbors = new HashSet<>();
     private final Set<Integer> chokedStatus = new HashSet<>();
@@ -23,7 +24,7 @@ public class Neighbors {
             if(peer.getPeerInfo().getPeerID() == info.getPeerID()) {
                 continue; // skip current peer
             }
-            interestingNeighbors.put(info.getPeerID(), null);
+            interestingNeighbors.put(info.getPeerID(), "");
             peerBitmaps.put(info.getPeerID(), new Bitmap(new byte[0], peer.getNumPieces()));
             chokedStatus.add(info.getPeerID()); // all neighbors start choked
             numOfPiecesByPeer.put(info.getPeerID(), 0);
@@ -79,14 +80,14 @@ public class Neighbors {
 
     public Set<Integer> getInterestingNeighbors() {
         return interestingNeighbors.entrySet().stream()
-                .filter(entry -> entry.getValue() != null && "interesting".equals(entry.getValue()))
+                .filter(entry -> !entry.getValue().isBlank() && "interesting".equals(entry.getValue()))
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
     }
 
     public Set<Integer> getNotInterestingNeighbors() {
         return interestingNeighbors.entrySet().stream()
-                .filter(entry -> entry.getValue() != null && "not interesting".equals(entry.getValue()))
+                .filter(entry -> !entry.getValue().isBlank() && "not interesting".equals(entry.getValue()))
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
     }
@@ -110,7 +111,7 @@ public class Neighbors {
         action.accept(peerID);
     }
 
-    public HashMap<Integer, Integer> getNumOfPiecesByPeer() {
+    public Map<Integer, Integer> getNumOfPiecesByPeer() {
         return numOfPiecesByPeer;
     }
 

@@ -1,5 +1,6 @@
 import java.io.IOException;
 import java.net.Socket;
+import java.util.Arrays;
 
 public class PrimaryConnector implements Runnable {
 
@@ -24,11 +25,14 @@ public class PrimaryConnector implements Runnable {
         try {
             // Handshake
             // Send Shake Message
+            System.out.println(expectedPeerID + " Send Hanshake");
             peer.getMessageManager().sendHandshakeMessage(expectedPeerID);
             // Receive Shake Message
+            System.out.println(expectedPeerID + " Receive Hanshake");
             int connectedPeerID = peer.getMessageManager().receivedValidHandshakeMessage(expectedPeerID, expectedPeerID);
             if (connectedPeerID == -1) return;
 
+            System.out.println(expectedPeerID + " Log Connection");
             // Log Handshake Done
             if (madeTCPConnection) {
                 peer.getLogger().logMakesConnectionTCP(connectedPeerID);
@@ -44,10 +48,10 @@ public class PrimaryConnector implements Runnable {
                     MessageManager.ActualMessage message = peer.getMessageManager().receiveActualMessage(connectedPeerID);
                     if (Thread.currentThread().isInterrupted()) {
                         Thread.currentThread().interrupt();
-                        break;
+                        continue;
                     }
                     if (message == null) {
-                        break;
+                        continue;
                     }
                     switch (message.type()) {
                         case CHOKE:
@@ -154,6 +158,8 @@ public class PrimaryConnector implements Runnable {
                             break;
                     }
                 } catch (Exception e) {
+                    System.out.println(expectedPeerID + " LMAO " + Arrays.toString(e.getStackTrace()));
+                    System.out.println(expectedPeerID + " LMAO " + e.getMessage());
                     break;
                 }
                 if (Thread.currentThread().isInterrupted()) {
@@ -196,8 +202,13 @@ public class PrimaryConnector implements Runnable {
             * Note it is possible to send a request message and not receive a piece message as neighbors may get re-evaluated, interrupting the expectations
             * */
 
-        } finally {
+        } catch (Exception e) {
+            System.out.println(expectedPeerID + " " + "Something general happened" + e);
+            System.out.println(expectedPeerID + " " + e.getMessage());
+        }
+        finally {
             try {
+                System.out.println("Performing Close for " + expectedPeerID);
                 socket.close();
                 peer.getServerSocket().close();
                 peer.getMessageManager().closeAll();

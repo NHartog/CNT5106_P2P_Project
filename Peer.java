@@ -1,3 +1,4 @@
+import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -209,11 +210,12 @@ public class Peer {
             }
             try {
                 Socket socket = new Socket(expectedPeer.getHostname(), expectedPeer.getPort());
+                socket.setSoTimeout(500);
 
 
                 neighbors.addNeighbor(expectedPeer.getPeerID(), socket);
                 messageManager.addOutputStream(expectedPeer.getPeerID(), new DataOutputStream(socket.getOutputStream()));
-                messageManager.addInputStream(expectedPeer.getPeerID(), new DataInputStream(socket.getInputStream()));
+                messageManager.addInputStream(expectedPeer.getPeerID(), new BufferedInputStream(socket.getInputStream()));
 
                 executor.submit(new SafeRunnable(new PrimaryConnector(socket, this, expectedPeer.getPeerID(), true)));
             } catch (IOException ignored) {
@@ -231,17 +233,19 @@ public class Peer {
                     }
                     try {
                         Socket socket = serverSocket.accept();
+                        socket.setSoTimeout(500);
 
                         // This is the expected peer because we should only receive new connections from peers that appear
                         // after this peer in the config file. Therefore, it would be the index of this peer plus the
                         // number of connected peers + 1. The + 1 describes the "next" peer to be expected.
+
                         PeerInfo expectedPeer = peers.get(indexInConfig + numConnectedPeers + 1);
                         numConnectedPeers++;
 
 
                         neighbors.addNeighbor(expectedPeer.getPeerID(), socket);
                         messageManager.addOutputStream(expectedPeer.getPeerID(), new DataOutputStream(socket.getOutputStream()));
-                        messageManager.addInputStream(expectedPeer.getPeerID(), new DataInputStream(socket.getInputStream()));
+                        messageManager.addInputStream(expectedPeer.getPeerID(), new BufferedInputStream(socket.getInputStream()));
 
                         executor.submit(new PrimaryConnector(socket, this, expectedPeer.getPeerID(), false));
                     } catch (SocketException | SocketTimeoutException ignored) {
@@ -329,6 +333,7 @@ public class Peer {
                     }
 
                     neighbors.updatePreferredNeighbors(preferredPeerIDs);
+                    if (!preferredPeerIDs.isEmpty())
                     logger.logPreferredNeighbors(preferredPeerIDs);
                 }
             } catch (Exception e) {

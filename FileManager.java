@@ -6,7 +6,6 @@ public class FileManager {
     private final int pieceSize;
     private final boolean containsInitialFile;
 
-    // TODO: Somethign is wrong here idk what
     public FileManager(int peerID, String fileName, int fileSize, int pieceSize, int numPieces, boolean containsInitialFile) {
         this.filePath = "peer_" + peerID + "/" + fileName;
         this.fileSize = fileSize;
@@ -30,6 +29,7 @@ public class FileManager {
             return buffer;
         } catch (Exception e) {
             System.out.println("File not found issue with reading piece from file");
+
             e.printStackTrace();
         }
         return new byte[0];

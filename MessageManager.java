@@ -1,13 +1,12 @@
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.EOFException;
-import java.io.IOException;
+import java.io.*;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MessageManager {
 
@@ -51,8 +50,8 @@ public class MessageManager {
 
 
     private final Peer peer;
-    private final Map<Integer, DataOutputStream> peerOutputStreams = new HashMap<>();
-    private final Map<Integer, DataInputStream> peerInputStreams = new HashMap<>();
+    private final Map<Integer, DataOutputStream> peerOutputStreams = new ConcurrentHashMap<>();
+    private final Map<Integer, BufferedInputStream> peerInputStreams = new ConcurrentHashMap<>();
 
     MessageManager(Peer peer) {
         this.peer = peer;
@@ -62,7 +61,7 @@ public class MessageManager {
         peerOutputStreams.put(peerID, out);
     }
 
-    public synchronized void addInputStream(Integer peerID, DataInputStream in) {
+    public synchronized void addInputStream(Integer peerID, BufferedInputStream in) {
         peerInputStreams.put(peerID, in);
     }
 
@@ -73,41 +72,60 @@ public class MessageManager {
                 out.write(content);
                 out.flush();
             } catch (IOException e) {
-                System.out.println("Something happened when writing to output stream");
+                System.out.println(peerID + " " + "Something happened when writing to output stream");
+                System.out.println(peerID + " " + e.getMessage());
             }
         }
 
     }
 
     public synchronized void closeAll() throws IOException {
+        System.out.println("Closing all sockets on this peer");
         for(Map.Entry<Integer, DataOutputStream> connection: peerOutputStreams.entrySet()){
             connection.getValue().close();
         }
-        for(Map.Entry<Integer, DataInputStream> connection: peerInputStreams.entrySet()){
+        for(Map.Entry<Integer, BufferedInputStream> connection: peerInputStreams.entrySet()){
             connection.getValue().close();
         }
     }
 
-    // TODO: Refactor out the data input stream so there can be a synchronized lock on it and see if that fixes any issues
     public ActualMessage receiveActualMessage(Integer peerID) throws Exception {
-        DataInputStream in = peerInputStreams.get(peerID);
+        BufferedInputStream in = peerInputStreams.get(peerID);
+        DataInputStream inputStream = new DataInputStream(in);
+        ActualMessage message = null;
+        while (!Thread.currentThread().isInterrupted() && message == null) {
             try {
-                int length = in.readInt() - 1; // - 1 compensates for the inclusion of type in the message length
-                int type = in.readByte();
-                byte[] payload = new byte[length];
-                int bytesRead = in.read(payload);
-                if (bytesRead != length) {
-                    throw new Exception(String.format("Failed to retrieve expected length: Got %d instead of %d", bytesRead, length));
-                }
+                in.mark(5); // mark with enough room
 
-                return new ActualMessage(length, MessageType.fromValue(type), payload);
-            } catch (SocketException | EOFException e) {
+                int initialLength = inputStream.readInt();
+                if (inputStream.available() >= initialLength && initialLength > 0) {
+                    in.reset();
+
+                    int length = inputStream.readInt() - 1; // - 1 compensates for the inclusion of type in the message length
+                    int type = inputStream.readByte();
+                    byte[] payload = new byte[length];
+                    int bytesRead = in.read(payload);
+                    if (bytesRead != length) {
+                        throw new Exception(String.format("Failed to retrieve expected length: Got %d instead of %d for %d", bytesRead, length, peerID));
+                    }
+
+                    message = new ActualMessage(length, MessageType.fromValue(type), payload);
+                } else {
+                    in.reset();
+                }
+            } catch (SocketException | SocketTimeoutException ignored) {
+            } catch (EOFException e) {
                 return null;
             } catch (Exception e) {
-                System.out.println("Definitely concerned about whatever happened here, but we will try to get through it");
+                System.out.println(peerID + " " + "Definitely concerned about whatever happened here, but we will try to get through it " + " " + e.getMessage());
+
+                System.out.println(peerID + " " + e.getMessage());
                 throw e;
             }
+        }
 
+
+        return message;
     }
 
     public void sendActualMessage(Integer peerID, MessageType type) {
@@ -206,24 +224,37 @@ public class MessageManager {
     }
 
     public int receivedValidHandshakeMessage(Integer peerID, int... validPeerIDs){
-        DataInputStream in = peerInputStreams.get(peerID);
-        synchronized (in) {
+        BufferedInputStream bufferedInputStream = peerInputStreams.get(peerID);
+        DataInputStream in = new DataInputStream(bufferedInputStream);
+        while (!Thread.currentThread().isInterrupted()) {
             byte[] buffer = new byte[32];
             try {
-                int bytesRead = in.read(buffer);
-                boolean correctLength = bytesRead == 32;
-                boolean correctHeader = Peer.PeerInfo.HEADER.equals(getHeaderFromHandshakeMessage(buffer));
+                if (in.available() >= 32) {
+                    int bytesRead = in.read(buffer);
+                    boolean correctLength = bytesRead == 32;
+                    String header = getHeaderFromHandshakeMessage(buffer);
+                    boolean correctHeader = Peer.PeerInfo.HEADER.equals(header);
 
-                // A valid Peer is considered a peer that is expected for a connection
-                int peerFromHandshake = getPeerIDFromHandshake(buffer);
-                boolean validPeer = Arrays.stream(validPeerIDs).anyMatch(id -> id == peerFromHandshake);
+                    // A valid Peer is considered a peer that is expected for a connection
+                    int peerFromHandshake = getPeerIDFromHandshake(buffer);
+                    boolean validPeer = Arrays.stream(validPeerIDs).anyMatch(id -> id == peerFromHandshake);
 
-                return correctLength && correctHeader && validPeer ? peerFromHandshake : -1;
+                    System.out.println(peerID + " Valid connection?: " + (correctLength && correctHeader && validPeer) + " Values: " + correctHeader + " " + header + " " + correctLength + " " + Arrays.toString(validPeerIDs) + peerID + " " + peerFromHandshake);
+                    return correctLength && correctHeader && validPeer ? peerFromHandshake : -1;
+                } else {
+                    System.out.println(peerID + " Does this actually happen?");
+                }
+            } catch (SocketTimeoutException ignored) {
             } catch (IOException e) {
                 System.out.println("Something happened when reading from input stream");
+                e.printStackTrace();
                 return -1;
             }
         }
+
+
+        System.out.println(peerID + " How did I even get here?");
+        return -1;
     }
 
     public byte[] getHandshakeMessage() {
