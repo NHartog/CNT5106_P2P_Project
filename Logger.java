@@ -40,7 +40,7 @@ public class Logger {
 
     // Change of Preferred Neighbors
     public synchronized void logPreferredNeighbors(List<Integer> preferredPeerIDs) {
-        String IDs = String.join(" ", preferredPeerIDs.stream().map(String::valueOf).toList());
+        String IDs = String.join(",", preferredPeerIDs.stream().map(String::valueOf).toList());
         logTime(String.format("Peer %d has the preferred neighbors %s.", peerID, IDs));
     }
 
