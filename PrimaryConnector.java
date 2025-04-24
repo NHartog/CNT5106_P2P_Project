@@ -68,6 +68,7 @@ public class PrimaryConnector implements Runnable {
                                 continue;
                             }
 
+                            System.out.println("Sent a 'Receive' Message for peer " + connectedPeerID + " , piece: " + randomPiece);
                             peer.getMessageManager().sendRequest(connectedPeerID, randomPiece);
                             break;
                         case INTERESTED:
@@ -122,6 +123,7 @@ public class PrimaryConnector implements Runnable {
                             }
                             byte[] requestedData = peer.getFileManager().readPiece(requestedPiece);
 
+                            System.out.println("Sent a 'Piece' Message for peer " + connectedPeerID + " , piece: " + requestedPiece);
                             peer.getMessageManager().sendPiece(connectedPeerID, requestedPiece, requestedData);
                             break;
                         case PIECE:
