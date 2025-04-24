@@ -132,8 +132,7 @@ public class Peer {
         try {
             serverSocket = new ServerSocket(peerInfo.getPort());
             serverSocket.setSoTimeout(500);
-        } catch (IOException e) {
-            System.out.println("Something happened with server socket");
+        } catch (IOException ignored) {
         }
     }
 
@@ -144,26 +143,33 @@ public class Peer {
                 String[] tokens = line.split(" ");
                 switch (tokens[0]) {
                     case "NumberOfPreferredNeighbors":
+                        System.out.println("Common.cfg : NumberOfPreferredNeighbors = " + Integer.parseInt(tokens[1]));
                         numPreferredNeighbors = Integer.parseInt(tokens[1]);
                         break;
                     case "UnchokingInterval":
+                        System.out.println("Common.cfg : UnchokingInterval = " + Integer.parseInt(tokens[1]));
                         unchokingInterval = Integer.parseInt(tokens[1]);
                         break;
                     case "OptimisticUnchokingInterval":
+                        System.out.println("Common.cfg : OptimisticUnchokingInterval = " + Integer.parseInt(tokens[1]));
                         optimisticUnchokingInterval = Integer.parseInt(tokens[1]);
                         break;
                     case "FileName":
+                        System.out.println("Common.cfg : FileName = " + tokens[1]);
                         fileName = tokens[1];
                         break;
                     case "FileSize":
+                        System.out.println("Common.cfg : FileSize = " + Integer.parseInt(tokens[1]));
                         fileSize = Integer.parseInt(tokens[1]);
                         break;
                     case "PieceSize":
+                        System.out.println("Common.cfg : PieceSize = " + Integer.parseInt(tokens[1]));
                         pieceSize = Integer.parseInt(tokens[1]);
                         break;
                 }
             }
             numPieces = (int) Math.ceil((double) fileSize / (double) pieceSize);
+            System.out.println("Num Pieces = " + numPieces);
         } catch (IOException e) {
             System.out.println("Error reading common.cfg");
         }
@@ -183,12 +189,16 @@ public class Peer {
                 info.setPeerID(id);
                 info.setHostname(tokens[1]);
                 info.setPort(Integer.parseInt(tokens[2]));
+
+                System.out.println("PeerInfo.cfg : " + info.getPeerID() + " " + info.getPort() + " " + tokens[3].equals("1"));
                 peers.add(info);
 
                 if (id == peerInfo.getPeerID()) { // If at current peer, get info just for local use (duplicate info)
                     peerInfo.setHostname(tokens[1]);
                     peerInfo.setPort(Integer.parseInt(tokens[2]));
                     hasFile = tokens[3].equals("1");
+
+                    System.out.println("PeerInfo.cfg : index " + cnt + " is the current peer's information");
 
                     // Note, we will keep track of the index in this ordered list so that we can use it for handling
                     // connections when receiving incoming connections and which peer to expect.
@@ -209,8 +219,10 @@ public class Peer {
                 break;
             }
             try {
+                System.out.println("Attempting to create connection with peer " + expectedPeer.getPeerID());
                 Socket socket = new Socket(expectedPeer.getHostname(), expectedPeer.getPort());
                 socket.setSoTimeout(500);
+                System.out.println("Created connection with peer " + expectedPeer.getPeerID());
 
 
                 neighbors.addNeighbor(expectedPeer.getPeerID(), socket);
@@ -321,8 +333,6 @@ public class Peer {
                             continue; // We don't need to do anything if the neighbor is already preferred
                         }
 
-//                        System.out.println(peerInfo.getPeerID() + " send unchoke to " + preferredPeerID);
-
                         // Send unchoke message
                         messageManager.sendUnchoke(preferredPeerID);
                     }
@@ -330,14 +340,15 @@ public class Peer {
                     // If a previous preferred is no longer preferred -> send choke
                     for (Integer previouslyPreferredID : neighbors.getPreferredNeighbors()) {
                         if (!preferredPeerIDs.contains(previouslyPreferredID)) {
-//                            System.out.println(peerInfo.getPeerID() + " send choke to " + previouslyPreferredID);
                             messageManager.sendChoke(previouslyPreferredID);
                         }
                     }
 
                     neighbors.updatePreferredNeighbors(preferredPeerIDs);
-                    if (!preferredPeerIDs.isEmpty())
+                    if (!preferredPeerIDs.isEmpty()) {
                         logger.logPreferredNeighbors(preferredPeerIDs);
+                    }
+
                 }
             } catch (Exception e) {
                 Thread.currentThread().interrupt();
@@ -374,11 +385,9 @@ public class Peer {
 
                     int oldPeerID = neighbors.getOptimisticNeighbor() != null ? neighbors.getOptimisticNeighbor() : -1;
                     if (oldPeerID != -1 && !neighbors.isPreferredNeighbor(oldPeerID)) {
-//                        System.out.println(peerInfo.getPeerID() + " send choke to " + oldPeerID);
                         messageManager.sendChoke(oldPeerID);
                     }
 
-//                    System.out.println(peerInfo.getPeerID() + " send unchoke to " + newPeerID);
                     messageManager.sendUnchoke(newPeerID);
                     logger.logUnchokedOptimisticNeighbor(newPeerID);
                     neighbors.setOptimisticNeighbor(newPeerID);

@@ -71,9 +71,7 @@ public class MessageManager {
             try {
                 out.write(content);
                 out.flush();
-            } catch (IOException e) {
-                System.out.println(peerID + " " + "Something happened when writing to output stream");
-                System.out.println(peerID + " " + e.getMessage());
+            } catch (IOException ignored) {
             }
         }
 
@@ -117,9 +115,6 @@ public class MessageManager {
             } catch (EOFException e) {
                 return null;
             } catch (Exception e) {
-                System.out.println(peerID + " " + "Definitely concerned about whatever happened here, but we will try to get through it " + " " + e.getMessage());
-
-                System.out.println(peerID + " " + e.getMessage());
                 throw e;
             }
         }
@@ -239,21 +234,14 @@ public class MessageManager {
                     int peerFromHandshake = getPeerIDFromHandshake(buffer);
                     boolean validPeer = Arrays.stream(validPeerIDs).anyMatch(id -> id == peerFromHandshake);
 
-                    System.out.println(peerID + " Valid connection?: " + (correctLength && correctHeader && validPeer) + " Values: " + correctHeader + " " + header + " " + correctLength + " " + Arrays.toString(validPeerIDs) + peerID + " " + peerFromHandshake);
+                    System.out.println(peerID + " Valid connection values: " + header + " " + peerFromHandshake);
                     return correctLength && correctHeader && validPeer ? peerFromHandshake : -1;
-                } else {
-                    System.out.println(peerID + " Does this actually happen?");
                 }
             } catch (SocketTimeoutException ignored) {
             } catch (IOException e) {
-                System.out.println("Something happened when reading from input stream");
-                e.printStackTrace();
                 return -1;
             }
         }
-
-
-        System.out.println(peerID + " How did I even get here?");
         return -1;
     }
 

@@ -41,6 +41,7 @@ public class PrimaryConnector implements Runnable {
             }
 
             // Send Bitmap
+            System.out.println(expectedPeerID + " Send Bitmap");
             peer.getMessageManager().sendBitmap(connectedPeerID);
             peer.getNeighbors().addHandshakedNeighbor(connectedPeerID);
 
@@ -98,6 +99,7 @@ public class PrimaryConnector implements Runnable {
                             break;
                         case BITFIELD:
                             Bitmap bitmap = peer.getMessageManager().getBitmap(message);
+                            System.out.println(expectedPeerID + " Received Bitmap");
 
                             // Save Bitmap
                             peer.getNeighbors().updatePeerBitfield(connectedPeerID, bitmap);
@@ -160,8 +162,6 @@ public class PrimaryConnector implements Runnable {
                             break;
                     }
                 } catch (Exception e) {
-                    System.out.println(expectedPeerID + " LMAO " + Arrays.toString(e.getStackTrace()));
-                    System.out.println(expectedPeerID + " LMAO " + e.getMessage());
                     break;
                 }
                 if (Thread.currentThread().isInterrupted()) {
@@ -204,18 +204,13 @@ public class PrimaryConnector implements Runnable {
             * Note it is possible to send a request message and not receive a piece message as neighbors may get re-evaluated, interrupting the expectations
             * */
 
-        } catch (Exception e) {
-            System.out.println(expectedPeerID + " " + "Something general happened" + e);
-            System.out.println(expectedPeerID + " " + e.getMessage());
-        }
-        finally {
+        } finally {
             try {
                 System.out.println("Performing Close for " + expectedPeerID);
                 socket.close();
                 peer.getServerSocket().close();
                 peer.getMessageManager().closeAll();
-            } catch (IOException e) {
-                System.out.println(peer.getPeerInfo().getPeerID() + " " + e);
+            } catch (IOException ignored) {
             }
         }
         peer.getExecutor().shutdownNow();

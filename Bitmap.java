@@ -72,4 +72,13 @@ public class Bitmap {
     public synchronized BitSet getBitset() {
         return bitfield;
     }
+
+    public synchronized void printBitfield() {
+        System.out.println("Current Bitfield: " + bitfield);
+        StringBuilder printout = new StringBuilder();
+        for(int i = 0; i < bitfield.length(); i++) {
+            printout.append(bitfield.get(i)).append(", ");
+        }
+        System.out.println(printout);
+    }
 }

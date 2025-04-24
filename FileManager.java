@@ -29,8 +29,6 @@ public class FileManager {
             return buffer;
         } catch (Exception e) {
             System.out.println("File not found issue with reading piece from file");
-
-            e.printStackTrace();
         }
         return new byte[0];
     }
@@ -46,7 +44,6 @@ public class FileManager {
                 outputFile.write(data);
             } catch (Exception e) {
                 System.out.println("File not found issue with writing piece to file");
-                e.printStackTrace();
             }
         }
     }
