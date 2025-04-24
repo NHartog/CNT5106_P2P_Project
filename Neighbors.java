@@ -7,6 +7,12 @@ import java.util.stream.Collectors;
 public class Neighbors {
     private Peer peer;
     private final Map<Integer, Socket> connectedPeers = new ConcurrentHashMap<>();
+
+    public synchronized Map<Integer, Boolean> getSuccessfullyConnectedPeers() {
+        return successfullyConnectedPeers;
+    }
+
+    private final Map<Integer, Boolean> successfullyConnectedPeers = new ConcurrentHashMap<>();
     private final Map<Integer, Bitmap> peerBitmaps = new ConcurrentHashMap<>();
     private final Map<Integer, Integer> numOfPiecesByPeer = new ConcurrentHashMap<>();
     // This set tracks whether the current peer is already interested in any neighbors
@@ -35,8 +41,12 @@ public class Neighbors {
         connectedPeers.put(neighborID, socket);
     }
 
+    public synchronized void addHandshakedNeighbor(int neighborID) {
+        successfullyConnectedPeers.put(neighborID, true);
+    }
+
     public synchronized void updatePeerBitfield(int peerID, Bitmap bitmap) {
-        peerBitmaps.put(peerID, bitmap);
+        peerBitmaps.get(peerID).getBitset().or(bitmap.getBitset());
         updateCompleteFileNeighbors();
     }
 
@@ -156,6 +166,10 @@ public class Neighbors {
                 continue;
             }
 
+            if (!successfullyConnectedPeers.containsKey(peerID)){
+                continue;
+            }
+
             peer.getMessageManager().sendHave(peerID, pieceIndex);
         }
     }
@@ -165,6 +179,10 @@ public class Neighbors {
             Integer peerID = connection.getKey();
 
             if (peerID == peer.getPeerInfo().getPeerID()){ // Skip the current peer
+                continue;
+            }
+
+            if (!successfullyConnectedPeers.containsKey(peerID)){
                 continue;
             }
 
@@ -182,7 +200,7 @@ public class Neighbors {
 
         Set<Integer> intersection = new HashSet<>(choked); // Start with all currently choked neighbors
         intersection.retainAll(interestedNeighbors);  // keep only IDs that are also interested
-        intersection.retainAll(connectedPeers.keySet()); // only look at the neighbors that you are actually connected to
+        intersection.retainAll(successfullyConnectedPeers.keySet()); // only look at the neighbors that you are actually connected to
         return intersection;
     }
 }

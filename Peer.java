@@ -287,7 +287,7 @@ public class Peer {
                                 // Only look at the analytics of interested neighbors and their statistics
                                 .filter(integer -> neighbors.getInterestedNeighbors().contains(integer))
                                 // Only select neighbors that are actually connected
-                                .filter(integer -> neighbors.getConnectedPeers().containsKey(integer))
+                                .filter(integer -> neighbors.getSuccessfullyConnectedPeers().containsKey(integer))
                                 .collect(Collectors.collectingAndThen(
                                         Collectors.toList(),
                                         (List<Integer> list) -> {
@@ -300,7 +300,7 @@ public class Peer {
                                 // Only look at the analytics of interested neighbors and their statistics
                                 .filter((Map.Entry<Integer, Integer> entry) -> neighbors.getInterestedNeighbors().contains(entry.getKey()))
                                 // Only select neighbors that are actually connected
-                                .filter((Map.Entry<Integer, Integer> entry) -> neighbors.getConnectedPeers().containsKey(entry.getKey()))
+                                .filter((Map.Entry<Integer, Integer> entry) -> neighbors.getSuccessfullyConnectedPeers().containsKey(entry.getKey()))
                                 // Sort them so that the greatest values are first
                                 .sorted(Map.Entry.<Integer, Integer>comparingByValue().reversed())
                                 // Only get the number of neighbors from the config file
@@ -321,6 +321,8 @@ public class Peer {
                             continue; // We don't need to do anything if the neighbor is already preferred
                         }
 
+//                        System.out.println(peerInfo.getPeerID() + " send unchoke to " + preferredPeerID);
+
                         // Send unchoke message
                         messageManager.sendUnchoke(preferredPeerID);
                     }
@@ -328,13 +330,14 @@ public class Peer {
                     // If a previous preferred is no longer preferred -> send choke
                     for (Integer previouslyPreferredID : neighbors.getPreferredNeighbors()) {
                         if (!preferredPeerIDs.contains(previouslyPreferredID)) {
+//                            System.out.println(peerInfo.getPeerID() + " send choke to " + previouslyPreferredID);
                             messageManager.sendChoke(previouslyPreferredID);
                         }
                     }
 
                     neighbors.updatePreferredNeighbors(preferredPeerIDs);
                     if (!preferredPeerIDs.isEmpty())
-                    logger.logPreferredNeighbors(preferredPeerIDs);
+                        logger.logPreferredNeighbors(preferredPeerIDs);
                 }
             } catch (Exception e) {
                 Thread.currentThread().interrupt();
@@ -371,9 +374,11 @@ public class Peer {
 
                     int oldPeerID = neighbors.getOptimisticNeighbor() != null ? neighbors.getOptimisticNeighbor() : -1;
                     if (oldPeerID != -1 && !neighbors.isPreferredNeighbor(oldPeerID)) {
+//                        System.out.println(peerInfo.getPeerID() + " send choke to " + oldPeerID);
                         messageManager.sendChoke(oldPeerID);
                     }
 
+//                    System.out.println(peerInfo.getPeerID() + " send unchoke to " + newPeerID);
                     messageManager.sendUnchoke(newPeerID);
                     logger.logUnchokedOptimisticNeighbor(newPeerID);
                     neighbors.setOptimisticNeighbor(newPeerID);
@@ -385,12 +390,12 @@ public class Peer {
     }
 
     public void start() {
-        createPNHandler();
-        createONHandler();
         //Create Senders AKA Client threads
         createSenders();
         //Create Receivers AKA Server threads
         createReceivers();
+        createPNHandler();
+        createONHandler();
     }
 
     public static class SafeRunnable implements Runnable {

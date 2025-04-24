@@ -42,7 +42,8 @@ public class PrimaryConnector implements Runnable {
 
             // Send Bitmap
             peer.getMessageManager().sendBitmap(connectedPeerID);
-            
+            peer.getNeighbors().addHandshakedNeighbor(connectedPeerID);
+
             while (!Thread.currentThread().isInterrupted() && peer.getNeighbors().getHasCompleteFileNeighbors().size() != peer.getAllPeerInfo().size()) {
                 try {
                     MessageManager.ActualMessage message = peer.getMessageManager().receiveActualMessage(connectedPeerID);
@@ -110,6 +111,7 @@ public class PrimaryConnector implements Runnable {
                             } else {
                                 peer.getMessageManager().sendNotInterested(connectedPeerID);
                             }
+
                             break;
                         case REQUEST:
                             int requestedPiece = peer.getMessageManager().getReceive(message);
